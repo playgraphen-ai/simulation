@@ -1,0 +1,155 @@
+//! Building data as an f32 texture.
+//!
+//! Each building = 3 RGBA32F texels (12 floats).
+//! Texel 0: [x, y, btype, level]
+//! Texel 1: [income_or_rent, occupants, capacity, road_segment_id]
+//! Texel 2: [growth, age_seconds, _pad0, _pad1]
+//!
+//! btype: 0=Residential, 1=Office, 2=Shop.
+//! level: 0..4 (five visual stages from undeveloped to dense).
+
+use bevy::prelude::*;
+use bytemuck::{Pod, Zeroable};
+
+use crate::sim::grid::{CityGrid, Tile, ZoneType};
+
+pub const BUILDING_CAPACITY: u32 = 16384;
+pub const TEXELS_PER_BUILDING: u32 = 3;
+pub const MAX_LEVEL: u32 = 4;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct BuildingRow {
+    pub x: f32,
+    pub y: f32,
+    pub btype: f32,
+    pub level: f32,
+    pub income: f32,
+    pub occupants: f32,
+    pub capacity: f32,
+    pub road_seg: f32,
+    pub growth: f32,
+    pub age_seconds: f32,
+    pub _pad0: f32,
+    pub _pad1: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Building {
+    pub tile: (u32, u32),
+    pub btype: ZoneType,
+    pub level: u32,
+    pub occupants: u32,
+    pub capacity: u32,
+    pub income: f32,
+    pub road_seg: u32,
+    /// Accumulator controlling upgrade / abandon cycles.
+    pub growth: f32,
+    /// Seconds since this building was constructed (grace period for abandon).
+    pub age_seconds: f32,
+}
+
+#[derive(Resource)]
+pub struct BuildingData {
+    pub items: Vec<Building>,
+    pub rows: Vec<BuildingRow>,
+    pub tex_width: u32,
+    pub tex_height: u32,
+    pub dirty: bool,
+}
+
+impl Default for BuildingData {
+    fn default() -> Self {
+        let total = BUILDING_CAPACITY * TEXELS_PER_BUILDING;
+        let side = (total as f32).sqrt().ceil() as u32;
+        let width = ((side + TEXELS_PER_BUILDING - 1) / TEXELS_PER_BUILDING) * TEXELS_PER_BUILDING;
+        let height = (total + width - 1) / width;
+        Self {
+            items: Vec::new(),
+            rows: vec![BuildingRow::default(); BUILDING_CAPACITY as usize],
+            tex_width: width,
+            tex_height: height,
+            dirty: true,
+        }
+    }
+}
+
+impl BuildingData {
+    pub fn push(&mut self, b: Building) -> Option<u32> {
+        if self.items.len() as u32 >= BUILDING_CAPACITY {
+            return None;
+        }
+        let id = self.items.len() as u32;
+        self.items.push(b);
+        self.refresh_row(id);
+        self.dirty = true;
+        Some(id)
+    }
+
+    pub fn refresh_row(&mut self, id: u32) {
+        let b = &self.items[id as usize];
+        self.rows[id as usize] = BuildingRow {
+            x: b.tile.0 as f32,
+            y: b.tile.1 as f32,
+            btype: match b.btype {
+                ZoneType::Residential => 0.0,
+                ZoneType::Office => 1.0,
+                ZoneType::Shop => 2.0,
+            },
+            level: b.level as f32,
+            income: b.income,
+            occupants: b.occupants as f32,
+            capacity: b.capacity as f32,
+            road_seg: b.road_seg as f32,
+            growth: b.growth,
+            age_seconds: b.age_seconds,
+            _pad0: 0.0,
+            _pad1: 0.0,
+        };
+    }
+}
+
+/// Capacity by level: each upgrade roughly doubles capacity.
+fn capacity_for(btype: ZoneType, level: u32) -> u32 {
+    let base = match btype {
+        ZoneType::Residential => 4,
+        ZoneType::Office => 6,
+        ZoneType::Shop => 8,
+    };
+    base * (1 << level)
+}
+
+/// Income/rent by level: higher levels yield more.
+fn income_for(btype: ZoneType, level: u32) -> f32 {
+    let base = match btype {
+        ZoneType::Residential => 2.0,  // rent collected from occupants
+        ZoneType::Office => 5.0,
+        ZoneType::Shop => 3.0,
+    };
+    base * (level as f32 + 1.0)
+}
+
+/// Public helper used by the road/zone construction systems to materialize a
+/// level-0 building on a zoned tile adjacent to a given road segment.
+pub fn spawn_building(
+    data: &mut BuildingData,
+    grid: &mut CityGrid,
+    tile: (u32, u32),
+    btype: ZoneType,
+    road_seg: u32,
+) -> Option<u32> {
+    let level = 0;
+    let id = data.push(Building {
+        tile,
+        btype,
+        level,
+        occupants: 0,
+        capacity: capacity_for(btype, level),
+        income: income_for(btype, level),
+        road_seg,
+        growth: 0.0,
+        age_seconds: 0.0,
+    })?;
+    grid.set(tile.0, tile.1, Tile::Building(id));
+    Some(id)
+}

@@ -1,0 +1,5 @@
+# WinLibs MinGW (UCRT + MCF) is on disk but not on the system PATH; point the
+# GNU toolchain linker at it explicitly so `cargo build` works from any shell.
+[target.x86_64-pc-windows-gnu]
+linker = "C:\\Users\\PC202518\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.MCF.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\gcc.exe"
+ar = "C:\\Users\\PC202518\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.MCF.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\ar.exe"

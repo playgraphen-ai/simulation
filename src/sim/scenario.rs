@@ -1,0 +1,156 @@
+//! Starter scenario: builds a test city at startup so we can iterate without
+//! click-painting every run. Layout:
+//!
+//!   - one long horizontal trunk road across the middle of the map
+//!   - three perpendicular side streets ("Residential", "Office", "Shop")
+//!     branching north off the trunk
+//!   - every tile adjacent to a side street is zoned with that street's type,
+//!     and the road tool auto-materialises buildings on both sides
+//!   - N people spawned straight away
+//!
+//! Runs once at Startup after the grid is reset.
+
+use bevy::prelude::*;
+
+use super::{
+    buildings::{spawn_building, BuildingData},
+    grid::{CityGrid, Tile, ZoneType},
+    roads::RoadData,
+    SpawnPeopleRequest,
+};
+use crate::ui::inspector::{Selection, SelectedObj};
+
+/// Tile coordinates of the trunk and side-streets so other systems can
+/// reference them if needed.
+#[allow(dead_code)]
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct ScenarioLayout {
+    pub trunk_y: u32,
+    pub res_x: u32,
+    pub off_x: u32,
+    pub shop_x: u32,
+    pub side_len: u32,
+}
+
+pub fn build_starter_scenario(
+    mut grid: ResMut<CityGrid>,
+    mut roads: ResMut<RoadData>,
+    mut buildings: ResMut<BuildingData>,
+    mut commands: Commands,
+    mut spawn_ev: MessageWriter<SpawnPeopleRequest>,
+    settings: Res<crate::ui::menu::MenuSettings>,
+) {
+    let w = grid.width;
+    let h = grid.height;
+    
+    // We'll build a grid of blocks.
+    // Each block is roughly 10x10 tiles.
+    let block_size = 8;
+    let grid_size_x = settings.grid_x;
+    let grid_size_y = settings.grid_y;
+    
+    let start_x = (w - (grid_size_x * block_size)) / 2;
+    let start_y = (h - (grid_size_y * block_size)) / 2;
+
+    let mut first_building_id = None;
+
+    // 1. Build the grid of roads
+    // Horizontal roads
+    for gy in 0..=grid_size_y {
+        let y = start_y + gy * block_size;
+        let mut prev = None;
+        for x in start_x..=(start_x + grid_size_x * block_size) {
+            if grid.get(x, y) == Some(Tile::Water) {
+                prev = None; // break the road
+                continue;
+            }
+            let here = (x, y);
+            let other = prev.unwrap_or(here);
+            if let Some(seg_id) = roads.push_segment(here, other) {
+                grid.set(here.0, here.1, Tile::Road(seg_id));
+            }
+            prev = Some(here);
+        }
+    }
+    // Vertical roads
+    for gx in 0..=grid_size_x {
+        let x = start_x + gx * block_size;
+        let mut prev = None;
+        for y in start_y..=(start_y + grid_size_y * block_size) {
+            if grid.get(x, y) == Some(Tile::Water) {
+                prev = None;
+                continue;
+            }
+            let here = (x, y);
+            let other = prev.unwrap_or(here);
+            if let Some(seg_id) = roads.push_segment(here, other) {
+                grid.set(here.0, here.1, Tile::Road(seg_id));
+            }
+            prev = Some(here);
+        }
+    }
+
+    // 2. Zone the blocks
+    for gy in 0..grid_size_y {
+        for gx in 0..grid_size_x {
+            // Determine zone type for this block based on position
+            // Center is mostly Offices/Shops, periphery is Residential
+            let dist_from_center = ((gx as i32 - 3).abs() + (gy as i32 - 2).abs()) as f32;
+            let zone = if dist_from_center < 1.5 {
+                ZoneType::Shop
+            } else if dist_from_center < 3.5 {
+                ZoneType::Office
+            } else {
+                ZoneType::Residential
+            };
+
+            // Fill the interior of the block (not the roads)
+            let bx = start_x + gx * block_size;
+            let by = start_y + gy * block_size;
+
+            for dy in 1..block_size {
+                for dx in 1..block_size {
+                    let tx = bx + dx;
+                    let ty = by + dy;
+                    
+                    // We only want to zone near the roads for realism/utility
+                    if dx == 1 || dx == block_size - 1 || dy == 1 || dy == block_size - 1 {
+                        // Find the nearest road segment for this building
+                        let mut nearest_road = None;
+                        for (nx, ny) in grid.neighbours4(tx, ty) {
+                            if let Some(Tile::Road(sid)) = grid.get(nx, ny) {
+                                nearest_road = Some(sid);
+                                break;
+                            }
+                        }
+
+                        if let Some(seg_id) = nearest_road {
+                            grid.set(tx, ty, Tile::Zone(zone));
+                            if let Some(bid) = spawn_building(&mut buildings, &mut grid, (tx, ty), zone, seg_id) {
+                                if first_building_id.is_none() {
+                                    first_building_id = Some(bid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(bid) = first_building_id {
+        commands.insert_resource(Selection {
+            obj: Some(SelectedObj::Building(bid)),
+        });
+    }
+
+    grid.set_changed();
+
+    // Seed the city with a lot of people to make it feel alive!
+    spawn_ev.write(SpawnPeopleRequest { count: settings.population });
+
+    info!(
+        "Large starter city built: {}x{} blocks, {} people spawned.",
+        grid_size_x, grid_size_y, settings.population
+    );
+}
