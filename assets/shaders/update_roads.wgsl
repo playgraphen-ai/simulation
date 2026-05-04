@@ -26,9 +26,17 @@ struct SimParams {
     buildings_tex_h: u32,
     roads_tex_w: u32,
     buildings_count: u32,
-    segments_count: u32, // Passed via _pad0 in Rust
-    _pad1: u32,
-    _pad2: u32,
+    segments_count: u32,
+    spawn_count: u32,
+    spawn_start_index: u32,
+    b_start: u32,
+    b_count: u32,
+    logic_start: u32,
+    logic_count: u32,
+    r_start: u32,
+    r_count: u32,
+    cycle_frames: u32,
+    _pad: u32,
 };
 
 @group(0) @binding(1) var roads_tex : texture_storage_2d<rgba32float, read_write>;
@@ -45,22 +53,14 @@ fn road_coords(sid: u32) -> array<vec2<i32>, 2> {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let seg_id = gid.x;
-    if seg_id >= params.segments_count { return; }
+    let seg_id = gid.x + params.r_start;
+    if seg_id >= params.r_start + params.r_count || seg_id >= params.segments_count { return; }
 
-    // Read and reset the congestion bits atomically in one instruction
-    let bits_set = atomicExchange(&congestion_buffer[seg_id], 0u);
+    // Read and reset the accumulated counts atomically
+    let total_cars = atomicExchange(&congestion_buffer[seg_id], 0u);
     
-    // Count population of set bits
-    let n = countOneBits(bits_set);
-    
-    // Probabilistic estimation formula to compensate for collisions.
-    // If n=32 (saturated), clamp to 31 to prevent division by zero or infinite log.
-    let safe_n = min(f32(n), 31.0);
-    let estimated_cars = -32.0 * log(1.0 - (safe_n / 32.0));
+    let estimated_cars = f32(total_cars) / f32(params.cycle_frames);
 
-    // Calculate congestion factor.
-    // Let's assume a segment heavily saturated at ~20 cars.
     let max_cars_on_segment = 20.0;
     
     // Factor: 1.0 = empty (full speed), 0.1 = completely jammed.
@@ -70,8 +70,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let coords = road_coords(seg_id);
     var tex1 = textureLoad(roads_tex, coords[1]);
     
-    // EMA (Exponential Moving Average) for smoothing: 95% old, 5% new
-    tex1.x = tex1.x * 0.95 + congestion_factor * 0.05;
+    // EMA (Exponential Moving Average) for smoothing: 50% old, 50% new
+    // Since it only runs once every cycle (e.g. 90 frames), we weight the new reading much more.
+    tex1.x = tex1.x * 0.5 + congestion_factor * 0.5;
     
     // Store updated speed back to the texture
     textureStore(roads_tex, coords[1], tex1);

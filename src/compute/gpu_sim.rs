@@ -30,7 +30,6 @@ fn prepare_readback_buffers(
     params: Res<GpuSimParams>,
     mut readback: ResMut<GpuReadbackBuffer>,
 ) {
-    // People buffer alignment
     let unaligned_p_row = params.people_tex_w * 16;
     let align = 256;
     let aligned_p_row = (unaligned_p_row + align - 1) & !(align - 1);
@@ -46,10 +45,13 @@ fn prepare_readback_buffers(
         readback.people_size = p_size;
     }
 
-    // Buildings buffer alignment
-    let unaligned_b_row = params.buildings_tex_w * 16;
+    let mut b_w = 128; // fallback
+    if params.buildings_tex_w > 0 { b_w = params.buildings_tex_w; }
+    let unaligned_b_row = b_w * 16;
     let aligned_b_row = (unaligned_b_row + align - 1) & !(align - 1);
-    let b_size = (aligned_b_row * params.buildings_tex_h) as u64;
+    let mut b_h = 128; // fallback
+    if params.buildings_tex_h > 0 { b_h = params.buildings_tex_h; }
+    let b_size = (aligned_b_row * b_h) as u64;
 
     if b_size > 0 && readback.buildings_size != b_size {
         readback.buildings_buffer = Some(render_device.create_buffer(&BufferDescriptor {
@@ -156,6 +158,14 @@ pub struct GpuSimParams {
     pub segments_count: u32,
     pub spawn_count: u32,
     pub spawn_start_index: u32,
+    pub b_start: u32,
+    pub b_count: u32,
+    pub logic_start: u32,
+    pub logic_count: u32,
+    pub r_start: u32,
+    pub r_count: u32,
+    pub cycle_frames: u32,
+    pub _pad: u32,
 }
 
 impl Default for GpuSimParams {
@@ -181,6 +191,14 @@ impl Default for GpuSimParams {
             segments_count: 0,
             spawn_count: 0,
             spawn_start_index: 0,
+            b_start: 0,
+            b_count: 0,
+            logic_start: 0,
+            logic_count: 0,
+            r_start: 0,
+            r_count: 0,
+            cycle_frames: 90,
+            _pad: 0,
         }
     }
 }
@@ -188,6 +206,7 @@ impl Default for GpuSimParams {
 #[derive(Resource)]
 struct GpuSimPipeline {
     pub people_pipeline: CachedComputePipelineId,
+    pub logic_pipeline: CachedComputePipelineId,
     pub buildings_pipeline: CachedComputePipelineId,
     pub update_roads_pipeline: CachedComputePipelineId,
     pub bind_group_layout: BindGroupLayout,
@@ -280,12 +299,22 @@ impl FromWorld for GpuSimPipeline {
         };
 
         let people_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label: Some(Cow::Borrowed("gpu_sim_people_pipeline")),
+            label: Some(Cow::Borrowed("gpu_sim_people_movement_pipeline")),
             layout: vec![layout_desc.clone()], 
             push_constant_ranges: vec![],
             shader: shader.clone(),
             shader_defs: vec![],
-            entry_point: Some(Cow::Borrowed("main_people")),
+            entry_point: Some(Cow::Borrowed("main_people_movement")),
+            zero_initialize_workgroup_memory: false,
+        });
+        
+        let logic_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::Borrowed("gpu_sim_people_logic_pipeline")),
+            layout: vec![layout_desc.clone()], 
+            push_constant_ranges: vec![],
+            shader: shader.clone(),
+            shader_defs: vec![],
+            entry_point: Some(Cow::Borrowed("main_people_logic")),
             zero_initialize_workgroup_memory: false,
         });
 
@@ -314,6 +343,7 @@ impl FromWorld for GpuSimPipeline {
             people_pipeline,
             buildings_pipeline,
             update_roads_pipeline,
+            logic_pipeline,
             bind_group_layout: layout,
         }
     }
@@ -346,11 +376,12 @@ fn prepare_gpu_sim_buffers(
     // Congestion buffer: segments_count * 4 bytes
     // We allocate a sufficiently large buffer or resize it if needed.
     let required_size = (params.segments_count as u64 * 4).max(4);
-    if congestion.0.is_none() || congestion.0.as_ref().unwrap().size() < required_size {
+    let max_segs = 65536u64; // Constante MAX_SEGMENTS
+    if congestion.0.is_none() || congestion.0.as_ref().unwrap().size() < (max_segs * 4) {
         congestion.0 = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_congestion_buffer"),
-            size: required_size.max(65536 * 4), // Pre-allocate for 65k segments
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            size: max_segs * 4,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         }));
     }
@@ -410,8 +441,9 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
         let readback = world.resource::<GpuReadbackBuffer>();
 
-        if let (Some(people_pipe), Some(build_pipe), Some(update_roads_pipe), Some(bg)) = (
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
+        if let (Some(movement_pipe), Some(logic_pipe), Some(build_pipe), Some(update_roads_pipe), Some(bg)) = (
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline), // This is movement now
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline), // This is logic
             pipeline_cache.get_compute_pipeline(gpu_pipeline.buildings_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.update_roads_pipeline),
             bind_group
@@ -423,23 +455,30 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             pass.set_bind_group(0, bg, &[]);
             
             // 1. Buildings pass
-            pass.set_pipeline(build_pipe);
-            let b_wg_count = (params.buildings_count + 63) / 64;
-            if b_wg_count > 0 {
+            if params.b_count > 0 {
+                pass.set_pipeline(build_pipe);
+                let b_wg_count = (params.b_count + 63) / 64;
                 pass.dispatch_workgroups(b_wg_count, 1, 1);
             }
 
-            // 2. People pass (updates congestion buffer + handles spawn if money == 0)
-            pass.set_pipeline(people_pipe);
+            // 2. People movement pass (every frame)
+            pass.set_pipeline(movement_pipe);
             let p_wg_count = (params.people_count + 63) / 64;
             if p_wg_count > 0 {
                 pass.dispatch_workgroups(p_wg_count, 1, 1);
             }
+            
+            // 3. People logic pass
+            if params.logic_count > 0 {
+                pass.set_pipeline(logic_pipe);
+                let logic_wg_count = (params.logic_count + 63) / 64;
+                pass.dispatch_workgroups(logic_wg_count, 1, 1);
+            }
 
-            // 3. Update Roads pass (consumes congestion buffer)
-            pass.set_pipeline(update_roads_pipe);
-            let r_wg_count = (params.segments_count + 63) / 64;
-            if r_wg_count > 0 {
+            // 4. Update Roads pass
+            if params.r_count > 0 {
+                pass.set_pipeline(update_roads_pipe);
+                let r_wg_count = (params.r_count + 63) / 64;
                 pass.dispatch_workgroups(r_wg_count, 1, 1);
             }
         }

@@ -1,0 +1,6 @@
+{
+  "buildings_frames": 10,
+  "people_logic_frames": 10,
+  "roads_frames": 10,
+  "pathfind_frames": 60
+}

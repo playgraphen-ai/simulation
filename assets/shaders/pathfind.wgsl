@@ -13,6 +13,10 @@ struct PathParams {
     roads_tex_w: u32,
     max_path_len: u32,
     request_count: u32,
+    slice_start: u32,
+    slice_end: u32,
+    do_dispatch: u32,
+    reset_path_queue: u32,
 };
 
 struct PathRequest {
@@ -22,10 +26,10 @@ struct PathRequest {
 };
 
 struct PathRequestQueue {
-    count_x: u32,
+    count_x: atomic<u32>,
     count_y: u32,
     count_z: u32,
-    pad: u32,
+    processed: atomic<u32>,
     requests: array<PathRequest>,
 };
 
@@ -33,13 +37,13 @@ struct PathRequestQueue {
 @group(0) @binding(1) var<storage, read_write> prev: array<i32>;
 @group(0) @binding(2) var<storage, read_write> paths: array<u32>;
 @group(0) @binding(3) var<uniform> params: PathParams;
-@group(0) @binding(4) var<storage, read> path_queue: PathRequestQueue;
+@group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
 
 fn seg_coords(seg: u32) -> array<vec2<i32>, 2> {
-    let base = i32(seg * 2u);
-    let w = i32(params.roads_tex_w);
-    let c0 = vec2<i32>(base % w, base / w);
-    let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
+    let base = seg * 2u;
+    let w = params.roads_tex_w;
+    let c0 = vec2<i32>(i32(base % w), i32(base / w));
+    let c1 = vec2<i32>(i32((base + 1u) % w), i32((base + 1u) / w));
     return array<vec2<i32>, 2>(c0, c1);
 }
 
@@ -59,15 +63,27 @@ var<workgroup> frontier_next: array<u32, 1024>;
 var<workgroup> frontier_len: atomic<u32>;
 var<workgroup> frontier_next_len: atomic<u32>;
 var<workgroup> found: atomic<u32>;
+var<workgroup> shared_req_id: u32;
 
 @compute @workgroup_size(64)
 fn main(
     @builtin(workgroup_id) wg: vec3<u32>,
     @builtin(local_invocation_index) lidx: u32,
 ) {
-    let req_id = wg.x;
-    if req_id >= path_queue.count_x { return; }
-    let req = path_queue.requests[req_id];
+    if lidx == 0u {
+        shared_req_id = atomicAdd(&path_queue.processed, 1u);
+    }
+    workgroupBarrier();
+    let req_id = shared_req_id;
+    let max_req = atomicLoad(&path_queue.count_x);
+
+    // D3D12/FXC compiler complains if we return early inside a workgroup barrier loop
+    // To solve this, we don't return early. We use a boolean flag to wrap all operations.
+    let is_valid_req = req_id < max_req;
+    var req: PathRequest;
+    if is_valid_req {
+        req = path_queue.requests[req_id];
+    }
 
     let slice = params.segments_count;
     let base_prev = req_id * slice;
@@ -75,20 +91,24 @@ fn main(
     // Initialize prev to -1 for this request's segments.
     var init_idx = lidx;
     while init_idx < slice {
-        prev[base_prev + init_idx] = -1;
+        if is_valid_req {
+            prev[base_prev + init_idx] = -1;
+        }
         init_idx = init_idx + 64u;
     }
     
     if lidx == 0u {
         atomicStore(&frontier_len, 1u);
         atomicStore(&frontier_next_len, 0u);
-        if req.start == req.target_seg {
-            atomicStore(&found, 1u);
-        } else {
-            atomicStore(&found, 0u);
+        if is_valid_req {
+            if req.start == req.target_seg {
+                atomicStore(&found, 1u);
+            } else {
+                atomicStore(&found, 0u);
+            }
+            frontier[0] = req.start;
+            prev[base_prev + req.start] = i32(req.start);
         }
-        frontier[0] = req.start;
-        prev[base_prev + req.start] = i32(req.start);
     }
     workgroupBarrier();
 
@@ -99,29 +119,31 @@ fn main(
         
         var i = lidx;
         while i < flen && is_found == 0u {
-            let cur = frontier[i];
-            let coords = seg_coords(cur);
-            let t1 = textureLoad(roads_tex, coords[1]);
-            let cap = unpack_conn(t1.y);
-            let cbp = unpack_conn(t1.z);
-            let total_count = cap[0] + cbp[0];
+            if is_valid_req {
+                let cur = frontier[i];
+                let coords = seg_coords(cur);
+                let t1 = textureLoad(roads_tex, coords[1]);
+                let cap = unpack_conn(t1.y);
+                let cbp = unpack_conn(t1.z);
+                let total_count = cap[0] + cbp[0];
 
-            for (var n: u32 = 0u; n < 6u; n = n + 1u) {
-                var nb: u32;
-                if n < cap[0] { nb = cap[n + 1u]; }
-                else if n < total_count { nb = cbp[n - cap[0] + 1u]; }
-                else { continue; }
-                
-                if nb >= params.segments_count { continue; }
+                for (var n: u32 = 0u; n < 6u; n = n + 1u) {
+                    var nb: u32;
+                    if n < cap[0] { nb = cap[n + 1u]; }
+                    else if n < total_count { nb = cbp[n - cap[0] + 1u]; }
+                    else { continue; }
+                    
+                    if nb >= params.segments_count { continue; }
 
-                if prev[base_prev + nb] < 0 {
-                    prev[base_prev + nb] = i32(cur);
-                    if nb == req.target_seg {
-                        atomicStore(&found, 1u);
-                    }
-                    let next_idx = atomicAdd(&frontier_next_len, 1u);
-                    if next_idx < MAX_FRONTIER {
-                        frontier_next[next_idx] = nb;
+                    if prev[base_prev + nb] < 0 {
+                        prev[base_prev + nb] = i32(cur);
+                        if nb == req.target_seg {
+                            atomicStore(&found, 1u);
+                        }
+                        let next_idx = atomicAdd(&frontier_next_len, 1u);
+                        if next_idx < MAX_FRONTIER {
+                            frontier_next[next_idx] = nb;
+                        }
                     }
                 }
             }
@@ -141,7 +163,9 @@ fn main(
         
         var j = lidx;
         while j < atomicLoad(&frontier_len) && atomicLoad(&found) == 0u {
-            frontier[j] = frontier_next[j];
+            if is_valid_req {
+                frontier[j] = frontier_next[j];
+            }
             j = j + 64u;
         }
         
@@ -152,7 +176,7 @@ fn main(
     }
 
     // Reconstruct path.
-    if lidx == 0u {
+    if lidx == 0u && is_valid_req {
         let base_path = req.person_id * params.max_path_len;
         // Initialize path to sentinel (u32::MAX).
         for (var pidx: u32 = 0u; pidx < params.max_path_len; pidx = pidx + 1u) {

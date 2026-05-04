@@ -36,11 +36,15 @@ pub struct PathParams {
     pub roads_tex_w: u32,
     pub max_path_len: u32,
     pub request_count: u32,
+    pub slice_start: u32,
+    pub slice_end: u32,
+    pub do_dispatch: u32,
+    pub reset_path_queue: u32,
 }
 
 impl Default for PathParams {
     fn default() -> Self {
-        Self { segments_count: 0, roads_tex_w: 0, max_path_len: 64, request_count: 0 }
+        Self { segments_count: 0, roads_tex_w: 0, max_path_len: 64, request_count: 0, slice_start: 0, slice_end: 0, do_dispatch: 0, reset_path_queue: 0 }
     }
 }
 
@@ -138,7 +142,7 @@ impl FromWorld for GpuPathfindingPipeline {
                 binding: 4,
                 visibility: ShaderStages::COMPUTE,
                 ty: BindingType::Buffer {
-                    ty: BufferBindingType::Storage { read_only: true },
+                    ty: BufferBindingType::Storage { read_only: false },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -203,32 +207,38 @@ fn prepare_path_buffers(
     // Mix CPU requests with GPU indirect buffer
     let cpu_req_count = requests.list.len().min(max_reqs as usize) as u32;
     if let Some(req_buf) = &buffers.requests {
-        // We write 0 to count_x to reset the atomic counter BEFORE the gpu_sim shader runs.
-        let header = [cpu_req_count, 1u32, 1u32, 0u32];
-        render_queue.write_buffer(req_buf, 0, bytemuck::cast_slice(&header));
-        if cpu_req_count > 0 {
-            render_queue.write_buffer(req_buf, 16, bytemuck::cast_slice(&requests.list[..cpu_req_count as usize]));
+        if params.reset_path_queue == 1 {
+            let header = [cpu_req_count, 1u32, 1u32, 0u32];
+            render_queue.write_buffer(req_buf, 0, bytemuck::cast_slice(&header));
+            if cpu_req_count > 0 {
+                render_queue.write_buffer(req_buf, 16, bytemuck::cast_slice(&requests.list[..cpu_req_count as usize]));
+            }
         }
     }
 
-    let prev_size = (max_reqs as u64 * params.segments_count as u64 * 4).max(4);
+    // Max buffer size for prev array is limit to 512MB
+    let max_prev_size = 67108864u64; // 64MB
+    let prev_size = (max_reqs as u64 * params.segments_count as u64 * 4).max(4).min(max_prev_size);
     if buffers.prev.is_none() || buffers.prev.as_ref().unwrap().size() < prev_size {
         buffers.prev = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("path_prev_buffer"),
-            size: prev_size,
+            size: max_prev_size, // Use fixed max allowed size
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         }));
     }
 
-    let people_capacity = 16384u64; // Constante PEOPLE_CAPACITY
-    let paths_size = (people_capacity * params.max_path_len as u64 * 4).max(4);
+    let people_capacity = 65536u64; // Max people
+    let paths_size = people_capacity * 256u64 * 4u64; // 256 max path len * 4 bytes per id
     if buffers.paths.is_none() || buffers.paths.as_ref().unwrap().size() < paths_size {
+        // Try to initialize it with clear_buffer if possible, or initialize with zero and rely on shader, but shader requires 0xFF.
+        // Let's create it mapped and fill it, or use command encoder.
+        // For simplicity, we will just allocate the 64MB vector.
         let initial_data = vec![0xFFu8; paths_size as usize];
         buffers.paths = Some(render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("path_results_buffer"),
             contents: &initial_data,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::MAP_READ, 
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::MAP_READ | BufferUsages::COPY_DST, 
         }));
     }
 
@@ -265,18 +275,24 @@ impl bevy::render::render_graph::Node for GpuPathfindingNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
+        let params = world.resource::<PathParams>();
+        if params.do_dispatch == 0 {
+            return Ok(());
+        }
+
         let pipeline_cache = world.resource::<PipelineCache>();
         let pipeline_id = world.resource::<GpuPathfindingPipeline>().pipeline;
         let buffers = world.resource::<GpuPathBuffers>();
 
-        if let (Some(pipeline), Some(bg), Some(req_buf)) = (pipeline_cache.get_compute_pipeline(pipeline_id), buffers.bind_group.as_ref(), buffers.requests.as_ref()) {
+        if let (Some(pipeline), Some(bg)) = (pipeline_cache.get_compute_pipeline(pipeline_id), buffers.bind_group.as_ref()) {
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                 label: Some("gpu_pathfinding_pass"),
                 ..default()
             });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bg, &[]);
-            pass.dispatch_workgroups_indirect(req_buf, 0);
+            // Dispatch 274 workgroups per frame (16384 max paths / 60 frames = 273.06)
+            pass.dispatch_workgroups(274, 1, 1);
         }
         Ok(())
     }
