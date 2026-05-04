@@ -26,12 +26,26 @@ struct SimParams {
     spawn_start_index: u32,
 };
 
+struct PathRequest {
+    start: u32,
+    target_seg: u32,
+    person_id: u32,
+};
+
+struct PathRequestQueue {
+    count_x: atomic<u32>,
+    count_y: u32,
+    count_z: u32,
+    processed: atomic<u32>,
+    requests: array<PathRequest>,
+};
+
 @group(0) @binding(0) var people_tex    : texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(1) var roads_tex     : texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(2) var buildings_tex : texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(3) var<uniform> params: SimParams;
-// Binding 4: Path queue (unused here)
-// Binding 5: Path buffer (unused here)
+@group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
+@group(0) @binding(5) var<storage, read_write> person_paths: array<u32>;
 // Binding 6: Congestion buffer (unused here)
 
 fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
@@ -123,6 +137,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let h_tex1 = textureLoad(buildings_tex, home_coords[1]);
     let home_seg = h_tex1.w;
 
+    let work_coords = building_coords(work_id);
+    let w_tex1 = textureLoad(buildings_tex, work_coords[1]);
+    let target_seg = w_tex1.w;
+
     let money = 50.0 + rand(&rng_state) * 450.0;
     let age = 18.0 + rand(&rng_state) * 57.0;
 
@@ -135,4 +153,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(people_tex, p_coords[0], texel0);
     textureStore(people_tex, p_coords[1], texel1);
     textureStore(people_tex, p_coords[2], texel2);
+
+    // Queue path request
+    let req_idx = atomicAdd(&path_queue.count_x, 1u);
+    let max_queue = 16384u;
+    if req_idx < max_queue {
+        path_queue.requests[req_idx] = PathRequest(u32(home_seg), u32(target_seg), pid);
+    }
+
+    // Reset path buffer for this person
+    let path_idx = pid * 256u;
+    if path_idx < 16777216u {
+        person_paths[path_idx] = 0xFFFFFFFFu;
+    }
 }
