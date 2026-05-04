@@ -243,11 +243,15 @@ fn prepare_path_buffers(
     }
 
     let param_bytes = bytemuck::bytes_of(&*params);
-    buffers.params = Some(render_device.create_buffer_with_data(&BufferInitDescriptor {
-        label: Some("path_params_buffer"),
-        contents: param_bytes,
-        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-    }));
+    if let Some(buf) = &buffers.params {
+        render_queue.write_buffer(buf, 0, param_bytes);
+    } else {
+        buffers.params = Some(render_device.create_buffer_with_data(&BufferInitDescriptor {
+            label: Some("path_params_buffer"),
+            contents: param_bytes,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        }));
+    }
 
     let Some(roads_gpu) = gpu_sim_textures.roads.as_ref().and_then(|h| gpu_images.get(h)) else { return; };
 

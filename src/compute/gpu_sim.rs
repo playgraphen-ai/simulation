@@ -406,18 +406,23 @@ struct GpuCongestionBuffer(Option<Buffer>);
 
 fn prepare_gpu_sim_buffers(
     render_device: Res<RenderDevice>,
+    render_queue: Res<bevy::render::renderer::RenderQueue>,
     params: Res<GpuSimParams>,
     mut buffer: ResMut<GpuSimUniformBuffer>,
     mut congestion: ResMut<GpuCongestionBuffer>,
     mut stats: ResMut<GpuStatsBuffer>,
 ) {
     let bytes = bytemuck::bytes_of(&*params);
-    let b = render_device.create_buffer_with_data(&BufferInitDescriptor {
-        label: Some("gpu_sim_params_buffer"),
-        contents: bytes,
-        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-    });
-    buffer.0 = Some(b);
+    if let Some(buf) = &buffer.0 {
+        render_queue.write_buffer(buf, 0, bytes);
+    } else {
+        let b = render_device.create_buffer_with_data(&BufferInitDescriptor {
+            label: Some("gpu_sim_params_buffer"),
+            contents: bytes,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+        buffer.0 = Some(b);
+    }
 
     // Congestion buffer: segments_count * 4 bytes
     let max_segs = 65536u64; 
