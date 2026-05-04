@@ -25,9 +25,9 @@ struct SimParams {
     buildings_tex_h: u32,
     roads_tex_w: u32,
     buildings_count: u32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
+    segments_count: u32,
+    spawn_count: u32,
+    spawn_start_index: u32,
 };
 
 struct PathRequest {
@@ -103,6 +103,68 @@ fn main_people(@builtin(global_invocation_id) gid: vec3<u32>) {
     var texel2 = textureLoad(people_tex, coords[2]);
 
     var money = texel0.x;
+    var rng_state = params.rng_seed + pid + 777u;
+
+    // --- GPU SPAWN LOGIC ---
+    // If money is 0, this is a fresh slot that needs initialization.
+    if money == 0.0 && params.buildings_count > 0u {
+        var home_id = 0u;
+        var found_home = false;
+        for (var i = 0u; i < 20u; i = i + 1u) {
+            let bid = u32(rand(&rng_state) * f32(params.buildings_count));
+            let b_coords = building_coords(bid);
+            let b_tex0 = textureLoad(buildings_tex, b_coords[0]);
+            var b_tex1 = textureLoad(buildings_tex, b_coords[1]);
+            if b_tex0.z == 0.0 && b_tex1.y < b_tex1.z { // Residential and has space
+                home_id = bid;
+                found_home = true;
+                b_tex1.y = b_tex1.y + 1.0;
+                textureStore(buildings_tex, b_coords[1], b_tex1);
+                break;
+            }
+        }
+        
+        if found_home {
+            var work_id = home_id;
+            for (var i = 0u; i < 20u; i = i + 1u) {
+                let bid = u32(rand(&rng_state) * f32(params.buildings_count));
+                let b_coords = building_coords(bid);
+                let b_tex0 = textureLoad(buildings_tex, b_coords[0]);
+                let b_tex1 = textureLoad(buildings_tex, b_coords[1]);
+                if b_tex0.z == 1.0 && b_tex1.y < b_tex1.z { // Office and has space
+                    work_id = bid;
+                    break;
+                }
+            }
+
+            let home_coords = building_coords(home_id);
+            let h_tex1 = textureLoad(buildings_tex, home_coords[1]);
+            let home_seg = h_tex1.w;
+            let target_b_coords = building_coords(work_id);
+            let target_b_tex1 = textureLoad(buildings_tex, target_b_coords[1]);
+            let target_seg = u32(target_b_tex1.w);
+
+            texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, 18.0 + rand(&rng_state) * 57.0, f32(work_id), f32(home_id));
+            texel1 = vec4<f32>(f32(work_id), 0.0, -10.0, 0.0); // Travel, waiting for path
+            texel2 = vec4<f32>(home_seg, home_seg, 0.0, 0.0);
+            
+            // Re-load variables for simulation
+            money = texel0.x;
+
+            // --- QUEUE INITIAL PATH REQUEST ---
+            let req_idx = atomicAdd(&path_queue.count_x, 1u);
+            if req_idx < 16384u {
+                path_queue.requests[req_idx] = PathRequest(u32(home_seg), target_seg, pid);
+            }
+            person_paths[pid * 256u] = 0xFFFFFFFFu;
+        } else {
+            // No home found yet, skip simulation for this frame
+            return;
+        }
+    } else if money == 0.0 {
+        return; // No buildings yet, can't spawn
+    }
+
     let age = texel0.y;
     var destination = texel0.z;
     let home = texel0.w;
@@ -112,8 +174,6 @@ fn main_people(@builtin(global_invocation_id) gid: vec3<u32>) {
     var path_cursor = texel1.w;
     var current_seg = texel2.x;
     var prev_seg = texel2.y;
-
-    var rng_state = params.rng_seed + pid;
 
     if activity == ACT_TRAVEL {
         let base_idx = pid * 256u;

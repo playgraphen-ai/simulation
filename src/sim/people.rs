@@ -74,6 +74,8 @@ pub struct PeopleData {
     pub tex_height: u32,
     /// Dirty flag: true if CPU shadow needs to be re-uploaded.
     pub dirty: bool,
+    /// True if the GPU has successfully run a compute pass and returned data.
+    pub gpu_initialized: bool,
 }
 
 impl Default for PeopleData {
@@ -91,6 +93,7 @@ impl Default for PeopleData {
             tex_width: width,
             tex_height: height,
             dirty: true,
+            gpu_initialized: false,
         }
     }
 }

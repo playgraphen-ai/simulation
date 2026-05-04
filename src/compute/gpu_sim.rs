@@ -85,10 +85,14 @@ struct GpuSimShader(Handle<Shader>);
 #[derive(Resource)]
 struct GpuUpdateRoadsShader(Handle<Shader>);
 
+#[derive(Resource)]
+struct GpuSpawnShader(Handle<Shader>);
+
 impl Plugin for GpuSimPlugin {
     fn build(&self, app: &mut App) {
         let shader = app.world_mut().resource::<AssetServer>().load("shaders/sim_people.wgsl");
         let update_roads_shader = app.world_mut().resource::<AssetServer>().load("shaders/update_roads.wgsl");
+        let spawn_shader = app.world_mut().resource::<AssetServer>().load("shaders/spawn_people.wgsl");
         let (tx_p, rx_p) = std::sync::mpsc::channel();
         let (tx_b, rx_b) = std::sync::mpsc::channel();
         
@@ -102,6 +106,7 @@ impl Plugin for GpuSimPlugin {
         render_app
             .insert_resource(GpuSimShader(shader))
             .insert_resource(GpuUpdateRoadsShader(update_roads_shader))
+            .insert_resource(GpuSpawnShader(spawn_shader))
             .insert_resource(PeopleSender(Mutex::new(tx_p)))
             .insert_resource(BuildingsSender(Mutex::new(tx_b)))
             .init_resource::<GpuReadbackBuffer>()
@@ -154,8 +159,8 @@ pub struct GpuSimParams {
     pub roads_tex_w: u32,
     pub buildings_count: u32,
     pub segments_count: u32,
-    pub _pad1: u32,
-    pub _pad2: u32,
+    pub spawn_count: u32,
+    pub spawn_start_index: u32,
 }
 
 impl Default for GpuSimParams {
@@ -179,8 +184,8 @@ impl Default for GpuSimParams {
             roads_tex_w: 0,
             buildings_count: 0,
             segments_count: 0,
-            _pad1: 0,
-            _pad2: 0,
+            spawn_count: 0,
+            spawn_start_index: 0,
         }
     }
 }
@@ -190,6 +195,7 @@ struct GpuSimPipeline {
     pub people_pipeline: CachedComputePipelineId,
     pub buildings_pipeline: CachedComputePipelineId,
     pub update_roads_pipeline: CachedComputePipelineId,
+    pub spawn_pipeline: CachedComputePipelineId,
     pub bind_group_layout: BindGroupLayout,
 }
 
@@ -302,9 +308,20 @@ impl FromWorld for GpuSimPipeline {
         let update_roads_shader = world.resource::<GpuUpdateRoadsShader>().0.clone();
         let update_roads_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some(Cow::Borrowed("gpu_sim_update_roads_pipeline")),
-            layout: vec![layout_desc], 
+            layout: vec![layout_desc.clone()], 
             push_constant_ranges: vec![],
             shader: update_roads_shader,
+            shader_defs: vec![],
+            entry_point: Some(Cow::Borrowed("main")),
+            zero_initialize_workgroup_memory: false,
+        });
+
+        let spawn_shader = world.resource::<GpuSpawnShader>().0.clone();
+        let spawn_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::Borrowed("gpu_sim_spawn_pipeline")),
+            layout: vec![layout_desc], 
+            push_constant_ranges: vec![],
+            shader: spawn_shader,
             shader_defs: vec![],
             entry_point: Some(Cow::Borrowed("main")),
             zero_initialize_workgroup_memory: false,
@@ -314,6 +331,7 @@ impl FromWorld for GpuSimPipeline {
             people_pipeline,
             buildings_pipeline,
             update_roads_pipeline,
+            spawn_pipeline,
             bind_group_layout: layout,
         }
     }
@@ -428,7 +446,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(b_wg_count, 1, 1);
             }
 
-            // 2. People pass (updates congestion buffer)
+            // 2. People pass (updates congestion buffer + handles spawn if money == 0)
             pass.set_pipeline(people_pipe);
             let p_wg_count = (params.people_count + 63) / 64;
             if p_wg_count > 0 {
@@ -573,18 +591,15 @@ pub fn apply_gpu_readback(
             for i in 0..np {
                 people.rows[i] = p_rows[i];
             }
-            // DO NOT set people.dirty = true here! It would cause the CPU to overwrite the GPU state continuously.
         }
     }
     if let Ok(rx) = rx_b.0.lock() {
         while let Ok(b_rows) = rx.try_recv() {
             let nb = (buildings.items.len()).min(b_rows.len());
-            // Sync Building items from rows
             for i in 0..nb {
                 let b = &mut buildings.items[i];
                 let r = &b_rows[i];
                 
-                // Now GPU handles occupants when leaving, so we sync occupants!
                 b.occupants = r.occupants as u32;
                 b.growth = r.growth;
                 b.age_seconds = r.age_seconds;
@@ -595,7 +610,6 @@ pub fn apply_gpu_readback(
                     b.income = r.income;
                 }
                 
-                // Abandonment logic: if GPU zeroed out the capacity, we must remove from grid
                 if b.capacity > 0 && r.capacity <= 0.0 {
                     b.capacity = 0;
                     if let Some(crate::sim::grid::Tile::Building(current_bid)) = grid.get(b.tile.0, b.tile.1) {
@@ -617,6 +631,7 @@ pub fn update_gpu_sim_params(
     people: &PeopleData,
     buildings: &BuildingData,
     roads: &crate::sim::roads::RoadData,
+    mut pending: ResMut<crate::compute::spawn::PendingGpuSpawns>,
     gpu_params: &mut GpuSimParams,
 ) {
     gpu_params.dt = time.delta_secs();
@@ -637,4 +652,27 @@ pub fn update_gpu_sim_params(
     gpu_params.roads_tex_w = roads.tex_width;
     gpu_params.buildings_count = buildings.items.len() as u32;
     gpu_params.segments_count = roads.segments.len() as u32;
+
+    if pending.count > 0 {
+        gpu_params.spawn_count = pending.count;
+        gpu_params.spawn_start_index = people.len.saturating_sub(pending.count);
+        // On garde pending.count pour l'extraction, et on l'efface
+        // via un système différé pour s'assurer que le RenderApp l'a copié.
+    } else {
+        gpu_params.spawn_count = 0;
+        gpu_params.spawn_start_index = 0;
+    }
+}
+
+pub fn clear_pending_spawns(mut pending: ResMut<crate::compute::spawn::PendingGpuSpawns>, mut frame_count: Local<u32>) {
+    // Wait for at least 1 frame so RenderApp is guaranteed to extract it.
+    if pending.count > 0 {
+        *frame_count += 1;
+        if *frame_count > 1 {
+            pending.count = 0;
+            *frame_count = 0;
+        }
+    } else {
+        *frame_count = 0;
+    }
 }

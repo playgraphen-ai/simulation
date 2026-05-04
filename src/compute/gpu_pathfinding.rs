@@ -224,11 +224,11 @@ fn prepare_path_buffers(
     let people_capacity = 16384u64; // Constante PEOPLE_CAPACITY
     let paths_size = (people_capacity * params.max_path_len as u64 * 4).max(4);
     if buffers.paths.is_none() || buffers.paths.as_ref().unwrap().size() < paths_size {
-        buffers.paths = Some(render_device.create_buffer(&BufferDescriptor {
+        let initial_data = vec![0xFFu8; paths_size as usize];
+        buffers.paths = Some(render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("path_results_buffer"),
-            size: paths_size,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::MAP_READ, // On peut garder copy/map read pour un eventuel debogage
-            mapped_at_creation: false,
+            contents: &initial_data,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::MAP_READ, 
         }));
     }
 

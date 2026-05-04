@@ -44,6 +44,7 @@ impl Plugin for ComputePlugin {
             .add_systems(Update, (
                 spawn::handle_spawn_requests,
                 sync_gpu_textures_and_params,
+                gpu_sim::clear_pending_spawns,
                 gpu_sim::apply_gpu_readback,
                 cpu_sim::cpu_sim_tick,
                 upload_dirty_textures_system,
@@ -71,6 +72,7 @@ fn sync_gpu_textures_and_params(
     people: Res<PeopleData>,
     buildings: Res<BuildingData>,
     roads: Res<RoadData>,
+    pending: ResMut<spawn::PendingGpuSpawns>,
     mut gpu_params: ResMut<gpu_sim::GpuSimParams>,
     mut path_params: ResMut<gpu_pathfinding::PathParams>,
 ) {
@@ -79,7 +81,7 @@ fn sync_gpu_textures_and_params(
         gpu_tex.roads = Some(dt.roads.clone());
         gpu_tex.buildings = Some(dt.buildings.clone());
     }
-    gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &mut gpu_params);
+    gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, pending, &mut gpu_params);
     path_params.roads_tex_w = roads.tex_width;
     path_params.segments_count = roads.segments.len() as u32;
     path_params.max_path_len = 256;

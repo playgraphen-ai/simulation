@@ -28,6 +28,7 @@ impl Plugin for SimPlugin {
             .init_resource::<counters::SimCounters>()
             .init_resource::<ActivityDurations>()
             .init_resource::<SimSettings>()
+            .init_resource::<crate::compute::spawn::PendingGpuSpawns>()
             .add_message::<SpawnPeopleRequest>()
             // `startup` resets the grid, then `build_starter_scenario` paints
             // the demo map on top of it — chain them so ordering is explicit.

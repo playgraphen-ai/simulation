@@ -84,7 +84,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
             }
         }
 
-        var frac = 1.0 - clamp(activity_time / seg_len, 0.0, 1.0);
+        // Si activity_time est négatif (timeout/attente de path), on reste au début du segment
+        var time_val = max(0.0, activity_time);
+        var frac = 1.0 - clamp(time_val / seg_len, 0.0, 1.0);
         if start_at_b {
             frac = 1.0 - frac;
         }
