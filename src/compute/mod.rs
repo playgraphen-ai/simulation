@@ -152,9 +152,11 @@ fn sync_gpu_textures_and_params(
                 let slice = (roads.segments.len() as u32 + c.roads_frames - 1) / c.roads_frames;
                 gpu_params.r_start = f * slice;
                 gpu_params.r_count = slice.min(roads.segments.len() as u32 - gpu_params.r_start.min(roads.segments.len() as u32));
-            } else {
+            } else if frame == c.roads_frames {
                 path_params.do_dispatch = 1;
                 // Dispatch logic is handled in gpu_pathfinding.rs
+            } else {
+                path_params.do_dispatch = 0;
             }
         }
     }

@@ -295,8 +295,8 @@ impl bevy::render::render_graph::Node for GpuPathfindingNode {
             });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bg, &[]);
-            // Dispatch 274 workgroups per frame (16384 max paths / 60 frames = 273.06)
-            pass.dispatch_workgroups(274, 1, 1);
+            // Let the GPU decide the number of workgroups based on the indirect buffer count_x
+            pass.dispatch_workgroups_indirect(buffers.requests.as_ref().unwrap(), 0);
         }
         Ok(())
     }
