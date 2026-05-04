@@ -210,6 +210,9 @@ pub struct GpuSimParams {
     pub cycle_frames: u32,
     pub do_readback: u32,
     pub reset_stats: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
 }
 
 impl Default for GpuSimParams {
@@ -244,6 +247,9 @@ impl Default for GpuSimParams {
             cycle_frames: 90,
             do_readback: 0,
             reset_stats: 0,
+            _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
         }
     }
 }

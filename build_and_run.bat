@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 
 echo Building Real City...
-cargo build
+cargo build --target x86_64-pc-windows-msvc
 if %ERRORLEVEL% neq 0 (
     echo Build failed! Check the errors above.
     pause
@@ -11,5 +11,5 @@ if %ERRORLEVEL% neq 0 (
 
 echo Build successful! Launching game...
 set RUST_BACKTRACE=1
-"target\debug\real_city.exe"
+"target\x86_64-pc-windows-msvc\debug\real_city.exe"
 pause
