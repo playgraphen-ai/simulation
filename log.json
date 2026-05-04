@@ -1,74 +1,78 @@
 [
   {"event": "game_started"}
 ,
-  {"timestamp":1.0,"fps":0.9125617131265522,"population":10000,"cars_on_road":10000,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":1.0,"fps":0.9995222283748368,"population":10000,"cars_on_road":10000,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":2.0308785,"fps":10.018805297543489,"population":10000,"cars_on_road":9960,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":2.0470561,"fps":12.23844904582932,"population":10000,"cars_on_road":9970,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":3.137302,"fps":13.051882538277908,"population":10000,"cars_on_road":9946,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":3.0903292,"fps":13.676242315661348,"population":10000,"cars_on_road":9960,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":4.0752751,"fps":5.023401515962109,"population":10000,"cars_on_road":9946,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":4.1425545,"fps":7.670129218666948,"population":10000,"cars_on_road":9956,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":5.1372391,"fps":5.1925447519469445,"population":10000,"cars_on_road":9920,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":5.0182064,"fps":5.116649372391788,"population":10000,"cars_on_road":9933,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":6.1460195,"fps":5.878988085054848,"population":10000,"cars_on_road":9905,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":6.1368765,"fps":5.262869821862382,"population":10000,"cars_on_road":9914,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":7.1099445,"fps":7.427180211615219,"population":10000,"cars_on_road":9895,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":7.032007,"fps":5.240032802605344,"population":10000,"cars_on_road":9905,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":8.1993013,"fps":5.075570164174392,"population":10000,"cars_on_road":9883,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":8.1282623,"fps":5.107951445856736,"population":10000,"cars_on_road":9887,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":9.0802084,"fps":5.8468556487349455,"population":10000,"cars_on_road":9861,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":9.0024657,"fps":5.830040332219019,"population":10000,"cars_on_road":9875,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":10.1282135,"fps":5.894898672586717,"population":10000,"cars_on_road":1978,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":10.03387,"fps":5.770943185641432,"population":10000,"cars_on_road":1886,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":11.1772039,"fps":6.736910183513433,"population":10000,"cars_on_road":1962,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":11.0402914,"fps":5.851820208675909,"population":10000,"cars_on_road":1874,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":12.0191061,"fps":6.7393210403624675,"population":10000,"cars_on_road":1952,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":12.0842775,"fps":6.971133234389715,"population":10000,"cars_on_road":1860,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":13.1345932,"fps":7.3447107799789055,"population":10000,"cars_on_road":1928,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":13.1152377,"fps":5.117502986062992,"population":10000,"cars_on_road":1831,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":14.0188084,"fps":7.393584143423703,"population":10000,"cars_on_road":1916,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":14.1324462,"fps":5.724370419430345,"population":10000,"cars_on_road":1811,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":15.0241782,"fps":6.235813524232371,"population":10000,"cars_on_road":1900,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":15.068088,"fps":5.494556817288952,"population":10000,"cars_on_road":1795,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":16.1238365,"fps":5.167830462086728,"population":10000,"cars_on_road":1873,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":16.0673,"fps":5.522198409275526,"population":10000,"cars_on_road":1782,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":17.1430032,"fps":5.2350265154093005,"population":10000,"cars_on_road":1850,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":17.0961902,"fps":4.974659086612794,"population":10000,"cars_on_road":1765,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":18.079282,"fps":5.169011157827485,"population":10000,"cars_on_road":1835,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":18.1059472,"fps":7.518276931219796,"population":10000,"cars_on_road":1740,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":19.0575911,"fps":5.122276421598181,"population":10000,"cars_on_road":1814,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":19.1584523,"fps":5.2010978477337,"population":10000,"cars_on_road":1724,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":20.1632676,"fps":5.134695910471442,"population":10000,"cars_on_road":1784,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":20.0615666,"fps":5.10630823106249,"population":10000,"cars_on_road":1704,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":21.1061393,"fps":6.787539164100976,"population":10000,"cars_on_road":1766,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":21.0585754,"fps":6.929738000465678,"population":10000,"cars_on_road":1681,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":22.0212993,"fps":5.59213120034537,"population":10000,"cars_on_road":1750,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":22.07917,"fps":5.404017887299207,"population":10000,"cars_on_road":1663,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":23.1018756,"fps":6.014480463163111,"population":10000,"cars_on_road":1726,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":23.0154254,"fps":5.339698253651686,"population":10000,"cars_on_road":1640,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":24.0508247,"fps":5.659863699162397,"population":10000,"cars_on_road":1706,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":24.0260375,"fps":4.992379133253089,"population":10000,"cars_on_road":1618,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":25.1156525,"fps":5.687829183113973,"population":10000,"cars_on_road":1671,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":25.1147328,"fps":5.770503609161482,"population":10000,"cars_on_road":1587,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":26.119423,"fps":5.6685968238852,"population":10000,"cars_on_road":1649,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":26.0046753,"fps":4.792457821578712,"population":10000,"cars_on_road":1565,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":27.005542,"fps":8.140266561168811,"population":10000,"cars_on_road":1625,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":27.0230889,"fps":5.948694886085467,"population":10000,"cars_on_road":1532,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":28.0139082,"fps":6.973218656428122,"population":10000,"cars_on_road":1598,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":28.0155232,"fps":5.431485342865228,"population":10000,"cars_on_road":1516,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":29.1826896,"fps":5.960395555690657,"population":10000,"cars_on_road":1578,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":29.0429785,"fps":4.914072527779252,"population":10000,"cars_on_road":1498,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":30.1133739,"fps":6.149993419507042,"population":10000,"cars_on_road":1568,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":30.1056832,"fps":7.278131616276523,"population":10000,"cars_on_road":1473,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":31.0235624,"fps":5.604156042120837,"population":10000,"cars_on_road":1544,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":31.148083,"fps":7.827586449821649,"population":10000,"cars_on_road":1452,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":32.0602483,"fps":5.81318628297312,"population":10000,"cars_on_road":1529,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":32.0481657,"fps":5.090656964553246,"population":10000,"cars_on_road":1460,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":33.068891,"fps":5.962911880684518,"population":10000,"cars_on_road":1533,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":33.1211235,"fps":5.495417371453945,"population":10000,"cars_on_road":1437,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":34.0207131,"fps":7.835731720217363,"population":10000,"cars_on_road":1473,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":34.1675203,"fps":5.939907147371472,"population":10000,"cars_on_road":1404,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":35.1457287,"fps":5.773358720716081,"population":10000,"cars_on_road":1445,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":35.0769465,"fps":5.144223448605092,"population":10000,"cars_on_road":1387,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
 ,
-  {"timestamp":36.1361558,"fps":7.18420738795151,"population":10000,"cars_on_road":1415,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+  {"timestamp":36.1190059,"fps":5.8417834731272125,"population":10000,"cars_on_road":1365,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+,
+  {"timestamp":37.1393695,"fps":5.336464058914563,"population":10000,"cars_on_road":1341,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}
+,
+  {"timestamp":38.146478,"fps":6.104685590378039,"population":10000,"cars_on_road":1323,"buildings_total":1868,"buildings_abandoned":0,"destroyed_buildings":0}

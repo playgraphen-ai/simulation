@@ -74,8 +74,6 @@ pub struct PeopleData {
     pub tex_height: u32,
     /// Dirty flag: true if CPU shadow needs to be re-uploaded.
     pub dirty: bool,
-    /// True if the GPU has successfully run a compute pass and returned data.
-    pub gpu_initialized: bool,
 }
 
 impl Default for PeopleData {
@@ -93,21 +91,7 @@ impl Default for PeopleData {
             tex_width: width,
             tex_height: height,
             dirty: true,
-            gpu_initialized: false,
         }
     }
 }
 
-impl PeopleData {
-    /// Append a new person; returns its id, or None if capacity is exhausted.
-    pub fn push(&mut self, row: PersonRow) -> Option<u32> {
-        if self.len >= PEOPLE_CAPACITY {
-            return None;
-        }
-        let id = self.len;
-        self.rows[id as usize] = row;
-        self.len += 1;
-        self.dirty = true;
-        Some(id)
-    }
-}

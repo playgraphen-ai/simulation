@@ -148,12 +148,4 @@ impl RoadData {
             length: seg.length,
         };
     }
-
-    /// Refresh *all* rows after any connection change.
-    pub fn refresh_all_rows(&mut self) {
-        for i in 0..self.segments.len() as u32 {
-            self.refresh_row(i);
-        }
-        self.dirty = true;
-    }
 }

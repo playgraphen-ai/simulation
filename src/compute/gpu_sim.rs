@@ -85,14 +85,10 @@ struct GpuSimShader(Handle<Shader>);
 #[derive(Resource)]
 struct GpuUpdateRoadsShader(Handle<Shader>);
 
-#[derive(Resource)]
-struct GpuSpawnShader(Handle<Shader>);
-
 impl Plugin for GpuSimPlugin {
     fn build(&self, app: &mut App) {
         let shader = app.world_mut().resource::<AssetServer>().load("shaders/sim_people.wgsl");
         let update_roads_shader = app.world_mut().resource::<AssetServer>().load("shaders/update_roads.wgsl");
-        let spawn_shader = app.world_mut().resource::<AssetServer>().load("shaders/spawn_people.wgsl");
         let (tx_p, rx_p) = std::sync::mpsc::channel();
         let (tx_b, rx_b) = std::sync::mpsc::channel();
         
@@ -106,7 +102,6 @@ impl Plugin for GpuSimPlugin {
         render_app
             .insert_resource(GpuSimShader(shader))
             .insert_resource(GpuUpdateRoadsShader(update_roads_shader))
-            .insert_resource(GpuSpawnShader(spawn_shader))
             .insert_resource(PeopleSender(Mutex::new(tx_p)))
             .insert_resource(BuildingsSender(Mutex::new(tx_b)))
             .init_resource::<GpuReadbackBuffer>()
@@ -195,7 +190,6 @@ struct GpuSimPipeline {
     pub people_pipeline: CachedComputePipelineId,
     pub buildings_pipeline: CachedComputePipelineId,
     pub update_roads_pipeline: CachedComputePipelineId,
-    pub spawn_pipeline: CachedComputePipelineId,
     pub bind_group_layout: BindGroupLayout,
 }
 
@@ -316,26 +310,15 @@ impl FromWorld for GpuSimPipeline {
             zero_initialize_workgroup_memory: false,
         });
 
-        let spawn_shader = world.resource::<GpuSpawnShader>().0.clone();
-        let spawn_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
-            label: Some(Cow::Borrowed("gpu_sim_spawn_pipeline")),
-            layout: vec![layout_desc], 
-            push_constant_ranges: vec![],
-            shader: spawn_shader,
-            shader_defs: vec![],
-            entry_point: Some(Cow::Borrowed("main")),
-            zero_initialize_workgroup_memory: false,
-        });
-
         Self {
             people_pipeline,
             buildings_pipeline,
             update_roads_pipeline,
-            spawn_pipeline,
             bind_group_layout: layout,
         }
     }
 }
+
 
 #[derive(Resource, Default)]
 struct GpuSimBindGroup(Option<BindGroup>);
@@ -631,7 +614,7 @@ pub fn update_gpu_sim_params(
     people: &PeopleData,
     buildings: &BuildingData,
     roads: &crate::sim::roads::RoadData,
-    mut pending: ResMut<crate::compute::spawn::PendingGpuSpawns>,
+    pending: ResMut<crate::compute::spawn::PendingGpuSpawns>,
     gpu_params: &mut GpuSimParams,
 ) {
     gpu_params.dt = time.delta_secs();
