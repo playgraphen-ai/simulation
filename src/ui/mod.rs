@@ -12,6 +12,7 @@ pub mod menu;
 pub mod speed;
 
 use bevy::prelude::*;
+use bevy::render::extract_resource::ExtractResourcePlugin;
 use crate::AppState;
 
 pub struct UiPlugin;
@@ -20,6 +21,7 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<tools::ActiveTool>()
             .init_resource::<inspector::Selection>()
+            .add_plugins(ExtractResourcePlugin::<inspector::Selection>::default())
             .init_resource::<menu::MenuSettings>()
             .add_systems(OnEnter(AppState::MainMenu), menu::setup_menu)
             .add_systems(Update, menu::handle_menu_actions.run_if(in_state(AppState::MainMenu)))

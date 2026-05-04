@@ -153,7 +153,6 @@ fn sync_gpu_textures_and_params(
                 gpu_params.r_start = f * slice;
                 gpu_params.r_count = slice.min(roads.segments.len() as u32 - gpu_params.r_start.min(roads.segments.len() as u32));
             } else {
-                frame -= c.roads_frames;
                 path_params.do_dispatch = 1;
                 // Dispatch logic is handled in gpu_pathfinding.rs
             }
@@ -171,9 +170,9 @@ fn sync_gpu_textures_and_params(
     }
 
     if schedule.current_frame >= schedule.cycle_frames - c.stats_frames {
-        gpu_params.do_readback = 1;
+        gpu_params.do_stats_readback = 1;
     } else {
-        gpu_params.do_readback = 0;
+        gpu_params.do_stats_readback = 0;
     }
 
     if schedule.current_frame == c.buildings_frames {

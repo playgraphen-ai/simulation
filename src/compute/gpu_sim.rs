@@ -35,55 +35,39 @@ pub struct GpuStats {
     pub _pad: [u32; 4],
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 #[derive(Resource, Default)]
 pub struct GpuReadbackBuffer {
-    pub people_buffer: Option<Buffer>,
-    pub buildings_buffer: Option<Buffer>,
+    pub inspector_p_buf: Option<Buffer>,
+    pub inspector_b_buf: Option<Buffer>,
     pub stats_buffer: Option<Buffer>,
-    pub people_size: u64,
-    pub buildings_size: u64,
+    pub p_mapped: Arc<AtomicBool>,
+    pub b_mapped: Arc<AtomicBool>,
+    pub s_mapped: Arc<AtomicBool>,
 }
 
 fn prepare_readback_buffers(
     render_device: Res<RenderDevice>,
-    params: Res<GpuSimParams>,
     mut readback: ResMut<GpuReadbackBuffer>,
 ) {
-    let unaligned_p_row = params.people_tex_w * 16;
-    let align = 256;
-    let aligned_p_row = (unaligned_p_row + align - 1) & !(align - 1);
-    let max_p_size = 65536u64 * 16u64; // Max people * 16 bytes
-    let _p_size = (aligned_p_row * params.people_tex_h) as u64;
-
-    if max_p_size > 0 && readback.people_size != max_p_size {
-        readback.people_buffer = Some(render_device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_people_readback_buffer"),
-            size: max_p_size,
+    if readback.inspector_p_buf.is_none() {
+        readback.inspector_p_buf = Some(render_device.create_buffer(&BufferDescriptor {
+            label: Some("inspector_p_buf"),
+            size: 256,
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
         }));
-        readback.people_size = max_p_size;
     }
-
-    let mut b_w = 128; // fallback
-    if params.buildings_tex_w > 0 { b_w = params.buildings_tex_w; }
-    let unaligned_b_row = b_w * 16;
-    let aligned_b_row = (unaligned_b_row + align - 1) & !(align - 1);
-    let mut b_h = 128; // fallback
-    if params.buildings_tex_h > 0 { b_h = params.buildings_tex_h; }
-    let _b_size = (aligned_b_row * b_h) as u64;
-    let max_b_size = 65536u64 * 16u64; // max buildings * 16 bytes
-
-    if max_b_size > 0 && readback.buildings_size != max_b_size {
-        readback.buildings_buffer = Some(render_device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_buildings_readback_buffer"),
-            size: max_b_size,
+    if readback.inspector_b_buf.is_none() {
+        readback.inspector_b_buf = Some(render_device.create_buffer(&BufferDescriptor {
+            label: Some("inspector_b_buf"),
+            size: 256,
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
         }));
-        readback.buildings_size = max_b_size;
     }
-
     if readback.stats_buffer.is_none() {
         readback.stats_buffer = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_stats_readback_buffer"),
@@ -100,16 +84,16 @@ pub struct GpuSimPlugin;
 pub struct GpuSimLabel;
 
 #[derive(Resource)]
-pub struct PeopleReceiver(pub Mutex<Receiver<Vec<crate::sim::people::PersonRow>>>);
+pub struct PeopleReceiver(pub Mutex<Receiver<Vec<(u32, crate::sim::people::PersonRow)>>>);
 
 #[derive(Resource)]
-pub struct BuildingsReceiver(pub Mutex<Receiver<Vec<crate::sim::buildings::BuildingRow>>>);
+pub struct BuildingsReceiver(pub Mutex<Receiver<Vec<(u32, crate::sim::buildings::BuildingRow)>>>);
 
 #[derive(Resource)]
-pub struct PeopleSender(pub Mutex<Sender<Vec<crate::sim::people::PersonRow>>>);
+pub struct PeopleSender(pub Mutex<Sender<Vec<(u32, crate::sim::people::PersonRow)>>>);
 
 #[derive(Resource)]
-pub struct BuildingsSender(pub Mutex<Sender<Vec<crate::sim::buildings::BuildingRow>>>);
+pub struct BuildingsSender(pub Mutex<Sender<Vec<(u32, crate::sim::buildings::BuildingRow)>>>);
 
 #[derive(Resource)]
 pub struct StatsSender(pub Mutex<Sender<GpuStats>>);
@@ -208,7 +192,7 @@ pub struct GpuSimParams {
     pub r_start: u32,
     pub r_count: u32,
     pub cycle_frames: u32,
-    pub do_readback: u32,
+    pub do_stats_readback: u32,
     pub reset_stats: u32,
     pub _pad0: u32,
     pub _pad1: u32,
@@ -245,7 +229,7 @@ impl Default for GpuSimParams {
             r_start: 0,
             r_count: 0,
             cycle_frames: 90,
-            do_readback: 0,
+            do_stats_readback: 0,
             reset_stats: 0,
             _pad0: 0,
             _pad1: 0,
@@ -562,54 +546,67 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             }
         }
 
-        // Copy People
-        if params.do_readback > 0 {
-            if let (Some(people_h), Some(p_buf)) = (textures.people.as_ref(), readback.people_buffer.as_ref()) {
-                if let Some(gpu_img) = gpu_images.get(people_h) {
-                    render_context.command_encoder().copy_texture_to_buffer(
-                        gpu_img.texture.as_image_copy(),
-                        TexelCopyBufferInfo {
-                            buffer: p_buf,
-                            layout: TexelCopyBufferLayout {
-                                offset: 0,
-                                bytes_per_row: Some({
-                                    let unaligned = gpu_img.texture.width() * 16;
-                                    let align = 256;
-                                    (unaligned + align - 1) & !(align - 1)
-                                }),
-                                rows_per_image: None,
-                            },
-                        },
-                        gpu_img.texture.size(),
-                    );
-                }
-            }
-
-            // Copy Buildings
-            if let (Some(buildings_h), Some(b_buf)) = (textures.buildings.as_ref(), readback.buildings_buffer.as_ref()) {
-                if let Some(gpu_img) = gpu_images.get(buildings_h) {
-                    render_context.command_encoder().copy_texture_to_buffer(
-                        gpu_img.texture.as_image_copy(),
-                        TexelCopyBufferInfo {
-                            buffer: b_buf,
-                            layout: TexelCopyBufferLayout {
-                                offset: 0,
-                                bytes_per_row: Some({
-                                    let unaligned = gpu_img.texture.width() * 16;
-                                    let align = 256;
-                                    (unaligned + align - 1) & !(align - 1)
-                                }),
-                                rows_per_image: None,
-                            },
-                        },
-                        gpu_img.texture.size(),
-                    );
-                }
-            }
-
-            // Copy Stats
+        // Copy Stats
+        if params.do_stats_readback > 0 && !readback.s_mapped.load(Ordering::Relaxed) {
             if let (Some(stats_buf), Some(rb_stats_buf)) = (world.resource::<GpuStatsBuffer>().0.as_ref(), readback.stats_buffer.as_ref()) {
                 render_context.command_encoder().copy_buffer_to_buffer(stats_buf, 0, rb_stats_buf, 0, 64);
+            }
+        }
+
+        // Selective Readbacks
+        if let Some(selection) = world.get_resource::<crate::ui::inspector::Selection>() {
+            match selection.obj {
+                Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
+                    if !readback.p_mapped.load(Ordering::Relaxed) {
+                        if let (Some(people_h), Some(p_buf)) = (textures.people.as_ref(), readback.inspector_p_buf.as_ref()) {
+                            if let Some(gpu_img) = gpu_images.get(people_h) {
+                                let texel_idx = pid * 3;
+                                let x = texel_idx % params.people_tex_w;
+                                let y = texel_idx / params.people_tex_w;
+                                let mut tex_info = gpu_img.texture.as_image_copy();
+                                tex_info.origin = Origin3d { x, y, z: 0 };
+                                render_context.command_encoder().copy_texture_to_buffer(
+                                    tex_info,
+                                    TexelCopyBufferInfo {
+                                        buffer: p_buf,
+                                        layout: TexelCopyBufferLayout {
+                                            offset: 0,
+                                            bytes_per_row: Some(256),
+                                            rows_per_image: None,
+                                        },
+                                    },
+                                    Extent3d { width: 3, height: 1, depth_or_array_layers: 1 },
+                                );
+                            }
+                        }
+                    }
+                }
+                Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
+                    if !readback.b_mapped.load(Ordering::Relaxed) {
+                        if let (Some(buildings_h), Some(b_buf)) = (textures.buildings.as_ref(), readback.inspector_b_buf.as_ref()) {
+                            if let Some(gpu_img) = gpu_images.get(buildings_h) {
+                                let texel_idx = bid * 3;
+                                let x = texel_idx % params.buildings_tex_w;
+                                let y = texel_idx / params.buildings_tex_w;
+                                let mut tex_info = gpu_img.texture.as_image_copy();
+                                tex_info.origin = Origin3d { x, y, z: 0 };
+                                render_context.command_encoder().copy_texture_to_buffer(
+                                    tex_info,
+                                    TexelCopyBufferInfo {
+                                        buffer: b_buf,
+                                        layout: TexelCopyBufferLayout {
+                                            offset: 0,
+                                            bytes_per_row: Some(256),
+                                            rows_per_image: None,
+                                        },
+                                    },
+                                    Extent3d { width: 3, height: 1, depth_or_array_layers: 1 },
+                                );
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -624,83 +621,83 @@ fn map_and_send_readback(
     sender_b: Res<BuildingsSender>,
     sender_s: Res<StatsSender>,
     params: Res<GpuSimParams>,
+    selection: Option<Res<crate::ui::inspector::Selection>>,
 ) {
-    if params.do_readback == 0 {
-        return;
-    }
-    
-    // Stats Readback (Always do it if do_readback is on)
-    if let Some(s_buf) = readback.stats_buffer.as_ref() {
-        let tx_s = sender_s.0.lock().unwrap().clone();
-        let s_clone = s_buf.clone();
-        s_buf.slice(..).map_async(MapMode::Read, move |res| {
-            if res.is_ok() {
-                let data = s_clone.slice(..).get_mapped_range();
-                let stats: GpuStats = *bytemuck::from_bytes(&data);
-                drop(data);
-                s_clone.unmap();
-                let _ = tx_s.send(stats);
-            }
-        });
+    // Stats Readback
+    if params.do_stats_readback > 0 && !readback.s_mapped.load(Ordering::Relaxed) {
+        if let Some(s_buf) = readback.stats_buffer.as_ref() {
+            readback.s_mapped.store(true, Ordering::Relaxed);
+            let tx_s = sender_s.0.lock().unwrap().clone();
+            let s_clone = s_buf.clone();
+            let s_mapped_flag = readback.s_mapped.clone();
+            s_buf.slice(..).map_async(MapMode::Read, move |res| {
+                if res.is_ok() {
+                    let data = s_clone.slice(..).get_mapped_range();
+                    let stats: GpuStats = *bytemuck::from_bytes(&data);
+                    drop(data);
+                    s_clone.unmap();
+                    let _ = tx_s.send(stats);
+                }
+                s_mapped_flag.store(false, Ordering::Relaxed);
+            });
+        }
     }
 
-    let (Some(p_buf), Some(b_buf)) = (readback.people_buffer.as_ref(), readback.buildings_buffer.as_ref()) else { return; };
-    
-    let tx_p = sender_p.0.lock().unwrap().clone();
-    let p_clone = p_buf.clone();
-    let p_w = params.people_tex_w;
-    let p_h = params.people_tex_h;
-    p_buf.slice(..).map_async(MapMode::Read, move |res_p| {
-        if res_p.is_ok() {
-            let data_p = p_clone.slice(..).get_mapped_range();
-            let unaligned_row = p_w as usize * 16;
-            let align = 256;
-            let aligned_row = (unaligned_row + align - 1) & !(align - 1);
-            
-            let mut rows_p = Vec::with_capacity((p_w * p_h / 3) as usize);
-            for y in 0..p_h as usize {
-                let start = y * aligned_row;
-                let end = start + unaligned_row;
-                if end <= data_p.len() {
-                    let row_data = &data_p[start..end];
-                    let persons: &[crate::sim::people::PersonRow] = bytemuck::cast_slice(row_data);
-                    rows_p.extend_from_slice(persons);
+    if let Some(sel) = selection {
+        match sel.obj {
+            Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
+                if !readback.p_mapped.load(Ordering::Relaxed) {
+                    if let Some(p_buf) = readback.inspector_p_buf.as_ref() {
+                        readback.p_mapped.store(true, Ordering::Relaxed);
+                        let tx_p = sender_p.0.lock().unwrap().clone();
+                        let p_clone = p_buf.clone();
+                        let p_mapped_flag = readback.p_mapped.clone();
+                        p_buf.slice(..).map_async(MapMode::Read, move |res_p| {
+                            if res_p.is_ok() {
+                                let data_p = p_clone.slice(..).get_mapped_range();
+                                if data_p.len() >= std::mem::size_of::<crate::sim::people::PersonRow>() {
+                                    let row: crate::sim::people::PersonRow = *bytemuck::from_bytes(&data_p[..std::mem::size_of::<crate::sim::people::PersonRow>()]);
+                                    drop(data_p);
+                                    p_clone.unmap();
+                                    let _ = tx_p.send(vec![(pid, row)]);
+                                } else {
+                                    drop(data_p);
+                                    p_clone.unmap();
+                                }
+                            }
+                            p_mapped_flag.store(false, Ordering::Relaxed);
+                        });
+                    }
                 }
             }
-
-            drop(data_p);
-            p_clone.unmap();
-            let _ = tx_p.send(rows_p);
-        }
-    });
-
-    let tx_b = sender_b.0.lock().unwrap().clone();
-    let b_clone = b_buf.clone();
-    let b_w = params.buildings_tex_w;
-    let b_h = params.buildings_tex_h;
-    b_buf.slice(..).map_async(MapMode::Read, move |res_b| {
-        if res_b.is_ok() {
-            let data_b = b_clone.slice(..).get_mapped_range();
-            let unaligned_row = b_w as usize * 16;
-            let align = 256;
-            let aligned_row = (unaligned_row + align - 1) & !(align - 1);
-            
-            let mut rows_b = Vec::with_capacity((b_w * b_h / 3) as usize);
-            for y in 0..b_h as usize {
-                let start = y * aligned_row;
-                let end = start + unaligned_row;
-                if end <= data_b.len() {
-                    let row_data = &data_b[start..end];
-                    let buildings: &[crate::sim::buildings::BuildingRow] = bytemuck::cast_slice(row_data);
-                    rows_b.extend_from_slice(buildings);
+            Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
+                if !readback.b_mapped.load(Ordering::Relaxed) {
+                    if let Some(b_buf) = readback.inspector_b_buf.as_ref() {
+                        readback.b_mapped.store(true, Ordering::Relaxed);
+                        let tx_b = sender_b.0.lock().unwrap().clone();
+                        let b_clone = b_buf.clone();
+                        let b_mapped_flag = readback.b_mapped.clone();
+                        b_buf.slice(..).map_async(MapMode::Read, move |res_b| {
+                            if res_b.is_ok() {
+                                let data_b = b_clone.slice(..).get_mapped_range();
+                                if data_b.len() >= std::mem::size_of::<crate::sim::buildings::BuildingRow>() {
+                                    let row: crate::sim::buildings::BuildingRow = *bytemuck::from_bytes(&data_b[..std::mem::size_of::<crate::sim::buildings::BuildingRow>()]);
+                                    drop(data_b);
+                                    b_clone.unmap();
+                                    let _ = tx_b.send(vec![(bid, row)]);
+                                } else {
+                                    drop(data_b);
+                                    b_clone.unmap();
+                                }
+                            }
+                            b_mapped_flag.store(false, Ordering::Relaxed);
+                        });
+                    }
                 }
             }
-
-            drop(data_b);
-            b_clone.unmap();
-            let _ = tx_b.send(rows_b);
+            _ => {}
         }
-    });
+    }
 }
 
 pub fn apply_gpu_readback(
@@ -724,35 +721,34 @@ pub fn apply_gpu_readback(
 
     if let Ok(rx) = rx_p.0.lock() {
         while let Ok(p_rows) = rx.try_recv() {
-            let np = (people.len as usize).min(p_rows.len());
-            for i in 0..np {
-                people.rows[i] = p_rows[i];
+            for (id, row) in p_rows {
+                if (id as usize) < people.rows.len() {
+                    people.rows[id as usize] = row;
+                }
             }
         }
     }
     if let Ok(rx) = rx_b.0.lock() {
         while let Ok(b_rows) = rx.try_recv() {
-            let nb = (buildings.items.len()).min(b_rows.len());
-            for i in 0..nb {
-                let b = &mut buildings.items[i];
-                let r = &b_rows[i];
-                
-                b.occupants = r.occupants as u32;
-                b.growth = r.growth;
-                b.age_seconds = r.age_seconds;
-                
-                if b.level != r.level as u32 {
-                    b.level = r.level as u32;
-                    b.capacity = r.capacity as u32;
-                    b.income = r.income;
-                }
-                
-                if b.capacity > 0 && r.capacity <= 0.0 {
-                    b.capacity = 0;
-                    if let Some(crate::sim::grid::Tile::Building(current_bid)) = grid.get(b.tile.0, b.tile.1) {
-                        if current_bid == i as u32 {
-                            grid.set(b.tile.0, b.tile.1, crate::sim::grid::Tile::Zone(b.btype));
-                            counters.destroyed_buildings += 1;
+            for (id, r) in b_rows {
+                if let Some(b) = buildings.items.get_mut(id as usize) {
+                    b.occupants = r.occupants as u32;
+                    b.growth = r.growth;
+                    b.age_seconds = r.age_seconds;
+                    
+                    if b.level != r.level as u32 {
+                        b.level = r.level as u32;
+                        b.capacity = r.capacity as u32;
+                        b.income = r.income;
+                    }
+                    
+                    if b.capacity > 0 && r.capacity <= 0.0 {
+                        b.capacity = 0;
+                        if let Some(crate::sim::grid::Tile::Building(current_bid)) = grid.get(b.tile.0, b.tile.1) {
+                            if current_bid == id {
+                                grid.set(b.tile.0, b.tile.1, crate::sim::grid::Tile::Zone(b.btype));
+                                counters.destroyed_buildings += 1;
+                            }
                         }
                     }
                 }

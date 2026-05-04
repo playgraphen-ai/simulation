@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use bevy::render::extract_resource::ExtractResource;
 
 use crate::sim::buildings::BuildingData;
 use crate::sim::grid::{CityGrid, Tile, ZoneType};
@@ -16,7 +17,7 @@ pub enum SelectedObj {
     Road(u32),
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone, ExtractResource)]
 pub struct Selection {
     pub obj: Option<SelectedObj>,
 }
