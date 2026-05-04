@@ -26,7 +26,8 @@ struct SimParams {
     r_start: u32,
     r_count: u32,
     cycle_frames: u32,
-    _pad: u32,
+    do_readback: u32,
+    reset_stats: u32,
 };
 
 struct PathRequest {
@@ -43,13 +44,30 @@ struct PathRequestQueue {
     requests: array<PathRequest>,
 };
 
-@group(0) @binding(0) var people_tex    : texture_storage_2d<rgba32float, read_write>;
-@group(0) @binding(1) var roads_tex     : texture_storage_2d<rgba32float, read_write>;
-@group(0) @binding(2) var buildings_tex : texture_storage_2d<rgba32float, read_write>;
+struct GpuStats {
+    people_count: atomic<u32>,
+    home_count: atomic<u32>,
+    work_count: atomic<u32>,
+    shop_count: atomic<u32>,
+    travelling_count: atomic<u32>,
+    total_money: atomic<u32>,
+    residential_occupancy: atomic<u32>,
+    office_occupancy: atomic<u32>,
+    shop_occupancy: atomic<u32>,
+    residential_count: atomic<u32>,
+    office_count: atomic<u32>,
+    shop_count_b: atomic<u32>,
+};
+
+@group(0) @binding(0) var people_tex: texture_storage_2d<rgba32float, read_write>;
+@group(0) @binding(1) var roads_tex: texture_storage_2d<rgba32float, read_write>;
+@group(0) @binding(2) var buildings_tex: texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(3) var<uniform> params: SimParams;
 @group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
 @group(0) @binding(5) var<storage, read_write> person_paths: array<u32>;
-@group(0) @binding(6) var<storage, read_write> congestion_buffer: array<atomic<u32>>;
+@group(0) @binding(6) var<storage, read_write> congestion: array<atomic<u32>>;
+@group(0) @binding(7) var<storage, read_write> stats: GpuStats;
+
 
 fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
     let base = i32(pid * 3u);
@@ -136,7 +154,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let speed = max(0.05, r_tex1.x); // speed_mean is tex1.x
                 
                 // Write to congestion buffer: Simple increment instead of bitmask
-                atomicAdd(&congestion_buffer[current_path_seg], 1u);
+                atomicAdd(&congestion[current_path_seg], 1u);
 
                 activity_time = activity_time - speed * params.dt;
 
@@ -216,6 +234,15 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
     var texel0 = textureLoad(people_tex, coords[0]);
     var texel1 = textureLoad(people_tex, coords[1]);
     var texel2 = textureLoad(people_tex, coords[2]);
+
+    // Statistics
+    atomicAdd(&stats.people_count, 1u);
+    let current_activity = texel1.y;
+    if (current_activity == ACT_HOME) { atomicAdd(&stats.home_count, 1u); }
+    else if (current_activity == ACT_WORK) { atomicAdd(&stats.work_count, 1u); }
+    else if (current_activity == ACT_SHOP) { atomicAdd(&stats.shop_count, 1u); }
+    else if (current_activity == ACT_TRAVEL) { atomicAdd(&stats.travelling_count, 1u); }
+    atomicAdd(&stats.total_money, u32(max(0.0, texel0.x)));
 
     var money = texel0.x;
     var rng_state = params.rng_seed + pid + 777u;
@@ -390,6 +417,18 @@ fn main_buildings(@builtin(global_invocation_id) gid: vec3<u32>) {
     var tex2 = textureLoad(buildings_tex, coords[2]);
 
     let btype = tex0.z;
+    let occupancy = tex1.y;
+    if (btype == 0.0) {
+        atomicAdd(&stats.residential_count, 1u);
+        atomicAdd(&stats.residential_occupancy, u32(occupancy));
+    } else if (btype == 1.0) {
+        atomicAdd(&stats.office_count, 1u);
+        atomicAdd(&stats.office_occupancy, u32(occupancy));
+    } else if (btype == 2.0) {
+        atomicAdd(&stats.shop_count_b, 1u);
+        atomicAdd(&stats.shop_occupancy, u32(occupancy));
+    }
+
     var level = tex0.w;
     var occupants = tex1.y;
     var capacity = tex1.z;

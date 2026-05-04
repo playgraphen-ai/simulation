@@ -36,12 +36,47 @@ struct SimParams {
     r_start: u32,
     r_count: u32,
     cycle_frames: u32,
-    _pad: u32,
+    do_readback: u32,
+    reset_stats: u32,
 };
 
-@group(0) @binding(1) var roads_tex : texture_storage_2d<rgba32float, read_write>;
+struct PathRequest {
+    start: u32,
+    target_seg: u32,
+    person_id: u32,
+};
+
+struct PathRequestQueue {
+    count_x: atomic<u32>,
+    count_y: u32,
+    count_z: u32,
+    processed: atomic<u32>,
+    requests: array<PathRequest>,
+};
+
+struct GpuStats {
+    people_count: atomic<u32>,
+    home_count: atomic<u32>,
+    work_count: atomic<u32>,
+    shop_count: atomic<u32>,
+    travelling_count: atomic<u32>,
+    total_money: atomic<u32>,
+    residential_occupancy: atomic<u32>,
+    office_occupancy: atomic<u32>,
+    shop_occupancy: atomic<u32>,
+    residential_count: atomic<u32>,
+    office_count: atomic<u32>,
+    shop_count_b: atomic<u32>,
+};
+
+@group(0) @binding(0) var people_tex: texture_storage_2d<rgba32float, read_write>;
+@group(0) @binding(1) var roads_tex: texture_storage_2d<rgba32float, read_write>;
+@group(0) @binding(2) var buildings_tex: texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(3) var<uniform> params: SimParams;
+@group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
+@group(0) @binding(5) var<storage, read_write> person_paths: array<u32>;
 @group(0) @binding(6) var<storage, read_write> congestion_buffer: array<atomic<u32>>;
+@group(0) @binding(7) var<storage, read_write> stats: GpuStats;
 
 fn road_coords(sid: u32) -> array<vec2<i32>, 2> {
     let base = i32(sid * 2u);

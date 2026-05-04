@@ -164,6 +164,12 @@ fn sync_gpu_textures_and_params(
         path_params.do_dispatch = 0;
     }
 
+    if schedule.current_frame == 0 {
+        gpu_params.reset_stats = 1;
+    } else {
+        gpu_params.reset_stats = 0;
+    }
+
     if schedule.current_frame >= schedule.cycle_frames - c.stats_frames {
         gpu_params.do_readback = 1;
     } else {

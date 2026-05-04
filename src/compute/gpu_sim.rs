@@ -17,10 +17,29 @@ use crate::sim::people::PeopleData;
 use crate::sim::buildings::BuildingData;
 use crate::sim::{ActivityDurations, SimSettings};
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, Pod, Zeroable, ShaderType)]
+pub struct GpuStats {
+    pub people_count: u32,
+    pub home_count: u32,
+    pub work_count: u32,
+    pub shop_count: u32,
+    pub travelling_count: u32,
+    pub total_money: u32,
+    pub residential_occupancy: u32,
+    pub office_occupancy: u32,
+    pub shop_occupancy: u32,
+    pub residential_count: u32,
+    pub office_count: u32,
+    pub shop_count_b: u32,
+    pub _pad: [u32; 4],
+}
+
 #[derive(Resource, Default)]
 pub struct GpuReadbackBuffer {
     pub people_buffer: Option<Buffer>,
     pub buildings_buffer: Option<Buffer>,
+    pub stats_buffer: Option<Buffer>,
     pub people_size: u64,
     pub buildings_size: u64,
 }
@@ -34,7 +53,7 @@ fn prepare_readback_buffers(
     let align = 256;
     let aligned_p_row = (unaligned_p_row + align - 1) & !(align - 1);
     let max_p_size = 65536u64 * 16u64; // Max people * 16 bytes
-    let p_size = (aligned_p_row * params.people_tex_h) as u64;
+    let _p_size = (aligned_p_row * params.people_tex_h) as u64;
 
     if max_p_size > 0 && readback.people_size != max_p_size {
         readback.people_buffer = Some(render_device.create_buffer(&BufferDescriptor {
@@ -52,7 +71,7 @@ fn prepare_readback_buffers(
     let aligned_b_row = (unaligned_b_row + align - 1) & !(align - 1);
     let mut b_h = 128; // fallback
     if params.buildings_tex_h > 0 { b_h = params.buildings_tex_h; }
-    let b_size = (aligned_b_row * b_h) as u64;
+    let _b_size = (aligned_b_row * b_h) as u64;
     let max_b_size = 65536u64 * 16u64; // max buildings * 16 bytes
 
     if max_b_size > 0 && readback.buildings_size != max_b_size {
@@ -63,6 +82,15 @@ fn prepare_readback_buffers(
             mapped_at_creation: false,
         }));
         readback.buildings_size = max_b_size;
+    }
+
+    if readback.stats_buffer.is_none() {
+        readback.stats_buffer = Some(render_device.create_buffer(&BufferDescriptor {
+            label: Some("gpu_stats_readback_buffer"),
+            size: 64, // GpuStats size
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        }));
     }
 }
 
@@ -84,10 +112,19 @@ pub struct PeopleSender(pub Mutex<Sender<Vec<crate::sim::people::PersonRow>>>);
 pub struct BuildingsSender(pub Mutex<Sender<Vec<crate::sim::buildings::BuildingRow>>>);
 
 #[derive(Resource)]
+pub struct StatsSender(pub Mutex<Sender<GpuStats>>);
+
+#[derive(Resource)]
+pub struct StatsReceiver(pub Mutex<Receiver<GpuStats>>);
+
+#[derive(Resource)]
 struct GpuSimShader(Handle<Shader>);
 
 #[derive(Resource)]
 struct GpuUpdateRoadsShader(Handle<Shader>);
+
+#[derive(Resource, Default)]
+struct GpuStatsBuffer(Option<Buffer>);
 
 impl Plugin for GpuSimPlugin {
     fn build(&self, app: &mut App) {
@@ -95,9 +132,11 @@ impl Plugin for GpuSimPlugin {
         let update_roads_shader = app.world_mut().resource::<AssetServer>().load("shaders/update_roads.wgsl");
         let (tx_p, rx_p) = std::sync::mpsc::channel();
         let (tx_b, rx_b) = std::sync::mpsc::channel();
+        let (tx_s, rx_s) = std::sync::mpsc::channel();
         
         app.insert_resource(PeopleReceiver(Mutex::new(rx_p)));
         app.insert_resource(BuildingsReceiver(Mutex::new(rx_b)));
+        app.insert_resource(StatsReceiver(Mutex::new(rx_s)));
 
         app.add_plugins(ExtractResourcePlugin::<GpuSimParams>::default())
            .add_plugins(ExtractResourcePlugin::<GpuSimTextures>::default());
@@ -108,10 +147,12 @@ impl Plugin for GpuSimPlugin {
             .insert_resource(GpuUpdateRoadsShader(update_roads_shader))
             .insert_resource(PeopleSender(Mutex::new(tx_p)))
             .insert_resource(BuildingsSender(Mutex::new(tx_b)))
+            .insert_resource(StatsSender(Mutex::new(tx_s)))
             .init_resource::<GpuReadbackBuffer>()
             .init_resource::<GpuSimBindGroup>()
             .init_resource::<GpuSimUniformBuffer>()
             .init_resource::<GpuCongestionBuffer>()
+            .init_resource::<GpuStatsBuffer>()
             .add_systems(Render, (
                 prepare_gpu_sim_buffers,
                 prepare_readback_buffers,
@@ -168,7 +209,7 @@ pub struct GpuSimParams {
     pub r_count: u32,
     pub cycle_frames: u32,
     pub do_readback: u32,
-    pub _pad: u32,
+    pub reset_stats: u32,
 }
 
 impl Default for GpuSimParams {
@@ -202,7 +243,7 @@ impl Default for GpuSimParams {
             r_count: 0,
             cycle_frames: 90,
             do_readback: 0,
-            _pad: 0,
+            reset_stats: 0,
         }
     }
 }
@@ -291,6 +332,16 @@ impl FromWorld for GpuSimPipeline {
                 },
                 count: None,
             },
+            BindGroupLayoutEntry {
+                binding: 7,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ];
 
         let layout = render_device.create_bind_group_layout(Some("gpu_sim_layout"), &entries);
@@ -368,6 +419,7 @@ fn prepare_gpu_sim_buffers(
     params: Res<GpuSimParams>,
     mut buffer: ResMut<GpuSimUniformBuffer>,
     mut congestion: ResMut<GpuCongestionBuffer>,
+    mut stats: ResMut<GpuStatsBuffer>,
 ) {
     let bytes = bytemuck::bytes_of(&*params);
     let b = render_device.create_buffer_with_data(&BufferInitDescriptor {
@@ -378,13 +430,20 @@ fn prepare_gpu_sim_buffers(
     buffer.0 = Some(b);
 
     // Congestion buffer: segments_count * 4 bytes
-    // We allocate a sufficiently large buffer or resize it if needed.
-    let required_size = (params.segments_count as u64 * 4).max(4);
-    let max_segs = 65536u64; // Constante MAX_SEGMENTS
+    let max_segs = 65536u64; 
     if congestion.0.is_none() || congestion.0.as_ref().unwrap().size() < (max_segs * 4) {
         congestion.0 = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_congestion_buffer"),
             size: max_segs * 4,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        }));
+    }
+
+    if stats.0.is_none() {
+        stats.0 = Some(render_device.create_buffer(&BufferDescriptor {
+            label: Some("gpu_sim_stats_buffer"),
+            size: 64, // GpuStats
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         }));
@@ -398,10 +457,11 @@ fn queue_gpu_sim_bind_group(
     textures: Res<GpuSimTextures>,
     buffer: Res<GpuSimUniformBuffer>,
     congestion: Res<GpuCongestionBuffer>,
+    stats: Res<GpuStatsBuffer>,
     path_buffers: Res<crate::compute::gpu_pathfinding::GpuPathBuffers>,
     mut bind_group: ResMut<GpuSimBindGroup>,
 ) {
-    let (Some(people), Some(roads), Some(buildings), Some(params_buf), Some(path_req_buf), Some(paths_buf), Some(congestion_buf)) = (
+    let (Some(people), Some(roads), Some(buildings), Some(params_buf), Some(path_req_buf), Some(paths_buf), Some(congestion_buf), Some(stats_buf)) = (
         textures.people.as_ref().and_then(|h| gpu_images.get(h)),
         textures.roads.as_ref().and_then(|h| gpu_images.get(h)),
         textures.buildings.as_ref().and_then(|h| gpu_images.get(h)),
@@ -409,6 +469,7 @@ fn queue_gpu_sim_bind_group(
         path_buffers.requests.as_ref(),
         path_buffers.paths.as_ref(),
         congestion.0.as_ref(),
+        stats.0.as_ref(),
     ) else { return; };
 
     let bg = render_device.create_bind_group(
@@ -422,6 +483,7 @@ fn queue_gpu_sim_bind_group(
             path_req_buf.as_entire_binding(),
             paths_buf.as_entire_binding(),
             congestion_buf.as_entire_binding(),
+            stats_buf.as_entire_binding(),
         )),
     );
     bind_group.0 = Some(bg);
@@ -446,12 +508,19 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         let readback = world.resource::<GpuReadbackBuffer>();
 
         if let (Some(movement_pipe), Some(logic_pipe), Some(build_pipe), Some(update_roads_pipe), Some(bg)) = (
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline), // This is movement now
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline), // This is logic
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.buildings_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.update_roads_pipeline),
             bind_group
         ) {
+            // Reset stats at the start of a cycle
+            if params.reset_stats > 0 {
+                if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
+                    render_context.command_encoder().clear_buffer(stats_buf, 0, None);
+                }
+            }
+
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                 label: Some("gpu_sim_pass"),
                 ..default()
@@ -531,6 +600,11 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                     );
                 }
             }
+
+            // Copy Stats
+            if let (Some(stats_buf), Some(rb_stats_buf)) = (world.resource::<GpuStatsBuffer>().0.as_ref(), readback.stats_buffer.as_ref()) {
+                render_context.command_encoder().copy_buffer_to_buffer(stats_buf, 0, rb_stats_buf, 0, 64);
+            }
         }
 
         Ok(())
@@ -538,15 +612,32 @@ impl bevy::render::render_graph::Node for GpuSimNode {
 }
 
 fn map_and_send_readback(
-    render_device: Res<RenderDevice>,
+    _render_device: Res<RenderDevice>,
     readback: Res<GpuReadbackBuffer>,
     sender_p: Res<PeopleSender>,
     sender_b: Res<BuildingsSender>,
+    sender_s: Res<StatsSender>,
     params: Res<GpuSimParams>,
 ) {
     if params.do_readback == 0 {
         return;
     }
+    
+    // Stats Readback (Always do it if do_readback is on)
+    if let Some(s_buf) = readback.stats_buffer.as_ref() {
+        let tx_s = sender_s.0.lock().unwrap().clone();
+        let s_clone = s_buf.clone();
+        s_buf.slice(..).map_async(MapMode::Read, move |res| {
+            if res.is_ok() {
+                let data = s_clone.slice(..).get_mapped_range();
+                let stats: GpuStats = *bytemuck::from_bytes(&data);
+                drop(data);
+                s_clone.unmap();
+                let _ = tx_s.send(stats);
+            }
+        });
+    }
+
     let (Some(p_buf), Some(b_buf)) = (readback.people_buffer.as_ref(), readback.buildings_buffer.as_ref()) else { return; };
     
     let tx_p = sender_p.0.lock().unwrap().clone();
@@ -609,11 +700,22 @@ fn map_and_send_readback(
 pub fn apply_gpu_readback(
     rx_p: Res<PeopleReceiver>,
     rx_b: Res<BuildingsReceiver>,
+    rx_s: Res<StatsReceiver>,
     mut people: ResMut<PeopleData>,
     mut buildings: ResMut<BuildingData>,
     mut grid: ResMut<crate::sim::grid::CityGrid>,
     mut counters: ResMut<crate::sim::counters::SimCounters>,
 ) {
+    if let Ok(rx) = rx_s.0.lock() {
+        while let Ok(stats) = rx.try_recv() {
+            counters.people = stats.people_count;
+            counters.residential = stats.residential_count;
+            counters.offices = stats.office_count;
+            counters.shops = stats.shop_count_b;
+            // Optionally update more counters here if needed
+        }
+    }
+
     if let Ok(rx) = rx_p.0.lock() {
         while let Ok(p_rows) = rx.try_recv() {
             let np = (people.len as usize).min(p_rows.len());
