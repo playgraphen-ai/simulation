@@ -49,6 +49,8 @@ struct PathRequestQueue {
 @group(0) @binding(2) var buildings_tex : texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(3) var<uniform> params: SimParams;
 @group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
+@group(0) @binding(5) var<storage, read_write> person_paths: array<u32>;
+@group(0) @binding(6) var<storage, read_write> congestion_buffer: array<atomic<u32>>;
 
 fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
     let base = i32(pid * 3u);
@@ -75,8 +77,6 @@ fn road_coords(sid: u32) -> array<vec2<i32>, 2> {
     let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
     return array<vec2<i32>, 2>(c0, c1);
 }
-
-@group(0) @binding(5) var<storage, read_write> person_paths: array<u32>;
 
 const ACT_TRAVEL: f32 = 0.0;
 const ACT_HOME:   f32 = 1.0;
@@ -133,6 +133,10 @@ fn main_people(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let r_tex1 = textureLoad(roads_tex, r_coords[1]);
                 let speed = max(0.05, r_tex1.x); // speed_mean is tex1.x
                 
+                // Write to congestion buffer
+                let bit_index = (pid + u32(params.dt * 1000.0)) % 32u;
+                atomicOr(&congestion_buffer[current_path_seg], 1u << bit_index);
+
                 activity_time = activity_time - speed * params.dt;
 
                 if activity_time <= 0.0 {

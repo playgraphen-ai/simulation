@@ -11,17 +11,11 @@ pub struct SimTiming {
 
 pub fn cpu_sim_tick(
     time: Res<Time>,
-    mut roads: ResMut<RoadData>,
+    _roads: ResMut<RoadData>,
 ) {
     let dt = time.delta_secs();
     if dt <= 0.0 { return; }
 
-    // On smoothed return speed_mean to 1.0 since traffic computation is now offloaded or simplified
-    for seg in roads.segments.iter_mut() {
-        seg.speed_mean = seg.speed_mean * 0.95 + 1.0 * 0.05;
-    }
-    
-    if !roads.segments.is_empty() {
-        roads.refresh_all_rows();
-    }
+    // Road speed and traffic are now fully simulated on the GPU using probabilistic estimation.
+    // The CPU no longer needs to run fallback smoothing for roads.
 }

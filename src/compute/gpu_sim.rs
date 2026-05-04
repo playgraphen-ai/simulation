@@ -82,9 +82,13 @@ pub struct BuildingsSender(pub Mutex<Sender<Vec<crate::sim::buildings::BuildingR
 #[derive(Resource)]
 struct GpuSimShader(Handle<Shader>);
 
+#[derive(Resource)]
+struct GpuUpdateRoadsShader(Handle<Shader>);
+
 impl Plugin for GpuSimPlugin {
     fn build(&self, app: &mut App) {
         let shader = app.world_mut().resource::<AssetServer>().load("shaders/sim_people.wgsl");
+        let update_roads_shader = app.world_mut().resource::<AssetServer>().load("shaders/update_roads.wgsl");
         let (tx_p, rx_p) = std::sync::mpsc::channel();
         let (tx_b, rx_b) = std::sync::mpsc::channel();
         
@@ -97,11 +101,13 @@ impl Plugin for GpuSimPlugin {
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .insert_resource(GpuSimShader(shader))
+            .insert_resource(GpuUpdateRoadsShader(update_roads_shader))
             .insert_resource(PeopleSender(Mutex::new(tx_p)))
             .insert_resource(BuildingsSender(Mutex::new(tx_b)))
             .init_resource::<GpuReadbackBuffer>()
             .init_resource::<GpuSimBindGroup>()
             .init_resource::<GpuSimUniformBuffer>()
+            .init_resource::<GpuCongestionBuffer>()
             .add_systems(Render, (
                 prepare_gpu_sim_buffers,
                 prepare_readback_buffers,
@@ -147,7 +153,7 @@ pub struct GpuSimParams {
     pub buildings_tex_h: u32,
     pub roads_tex_w: u32,
     pub buildings_count: u32,
-    pub _pad0: u32,
+    pub segments_count: u32,
     pub _pad1: u32,
     pub _pad2: u32,
 }
@@ -172,7 +178,7 @@ impl Default for GpuSimParams {
             buildings_tex_h: 0,
             roads_tex_w: 0,
             buildings_count: 0,
-            _pad0: 0,
+            segments_count: 0,
             _pad1: 0,
             _pad2: 0,
         }
@@ -183,6 +189,7 @@ impl Default for GpuSimParams {
 struct GpuSimPipeline {
     pub people_pipeline: CachedComputePipelineId,
     pub buildings_pipeline: CachedComputePipelineId,
+    pub update_roads_pipeline: CachedComputePipelineId,
     pub bind_group_layout: BindGroupLayout,
 }
 
@@ -251,6 +258,16 @@ impl FromWorld for GpuSimPipeline {
                 },
                 count: None,
             },
+            BindGroupLayoutEntry {
+                binding: 6,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ];
 
         let layout = render_device.create_bind_group_layout(Some("gpu_sim_layout"), &entries);
@@ -274,17 +291,29 @@ impl FromWorld for GpuSimPipeline {
 
         let buildings_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some(Cow::Borrowed("gpu_sim_buildings_pipeline")),
-            layout: vec![layout_desc], 
+            layout: vec![layout_desc.clone()], 
             push_constant_ranges: vec![],
-            shader,
+            shader: shader,
             shader_defs: vec![],
             entry_point: Some(Cow::Borrowed("main_buildings")),
+            zero_initialize_workgroup_memory: false,
+        });
+
+        let update_roads_shader = world.resource::<GpuUpdateRoadsShader>().0.clone();
+        let update_roads_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::Borrowed("gpu_sim_update_roads_pipeline")),
+            layout: vec![layout_desc], 
+            push_constant_ranges: vec![],
+            shader: update_roads_shader,
+            shader_defs: vec![],
+            entry_point: Some(Cow::Borrowed("main")),
             zero_initialize_workgroup_memory: false,
         });
 
         Self {
             people_pipeline,
             buildings_pipeline,
+            update_roads_pipeline,
             bind_group_layout: layout,
         }
     }
@@ -296,10 +325,14 @@ struct GpuSimBindGroup(Option<BindGroup>);
 #[derive(Resource, Default)]
 struct GpuSimUniformBuffer(Option<Buffer>);
 
+#[derive(Resource, Default)]
+struct GpuCongestionBuffer(Option<Buffer>);
+
 fn prepare_gpu_sim_buffers(
     render_device: Res<RenderDevice>,
     params: Res<GpuSimParams>,
     mut buffer: ResMut<GpuSimUniformBuffer>,
+    mut congestion: ResMut<GpuCongestionBuffer>,
 ) {
     let bytes = bytemuck::bytes_of(&*params);
     let b = render_device.create_buffer_with_data(&BufferInitDescriptor {
@@ -308,6 +341,18 @@ fn prepare_gpu_sim_buffers(
         usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
     });
     buffer.0 = Some(b);
+
+    // Congestion buffer: segments_count * 4 bytes
+    // We allocate a sufficiently large buffer or resize it if needed.
+    let required_size = (params.segments_count as u64 * 4).max(4);
+    if congestion.0.is_none() || congestion.0.as_ref().unwrap().size() < required_size {
+        congestion.0 = Some(render_device.create_buffer(&BufferDescriptor {
+            label: Some("gpu_congestion_buffer"),
+            size: required_size.max(65536 * 4), // Pre-allocate for 65k segments
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+    }
 }
 
 fn queue_gpu_sim_bind_group(
@@ -316,16 +361,18 @@ fn queue_gpu_sim_bind_group(
     gpu_images: Res<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>,
     textures: Res<GpuSimTextures>,
     buffer: Res<GpuSimUniformBuffer>,
+    congestion: Res<GpuCongestionBuffer>,
     path_buffers: Res<crate::compute::gpu_pathfinding::GpuPathBuffers>,
     mut bind_group: ResMut<GpuSimBindGroup>,
 ) {
-    let (Some(people), Some(roads), Some(buildings), Some(params_buf), Some(path_req_buf), Some(paths_buf)) = (
+    let (Some(people), Some(roads), Some(buildings), Some(params_buf), Some(path_req_buf), Some(paths_buf), Some(congestion_buf)) = (
         textures.people.as_ref().and_then(|h| gpu_images.get(h)),
         textures.roads.as_ref().and_then(|h| gpu_images.get(h)),
         textures.buildings.as_ref().and_then(|h| gpu_images.get(h)),
         buffer.0.as_ref(),
         path_buffers.requests.as_ref(),
         path_buffers.paths.as_ref(),
+        congestion.0.as_ref(),
     ) else { return; };
 
     let bg = render_device.create_bind_group(
@@ -338,6 +385,7 @@ fn queue_gpu_sim_bind_group(
             params_buf.as_entire_binding(),
             path_req_buf.as_entire_binding(),
             paths_buf.as_entire_binding(),
+            congestion_buf.as_entire_binding(),
         )),
     );
     bind_group.0 = Some(bg);
@@ -361,9 +409,10 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
         let readback = world.resource::<GpuReadbackBuffer>();
 
-        if let (Some(people_pipe), Some(build_pipe), Some(bg)) = (
+        if let (Some(people_pipe), Some(build_pipe), Some(update_roads_pipe), Some(bg)) = (
             pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.buildings_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.update_roads_pipeline),
             bind_group
         ) {
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
@@ -379,11 +428,18 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(b_wg_count, 1, 1);
             }
 
-            // 2. People pass
+            // 2. People pass (updates congestion buffer)
             pass.set_pipeline(people_pipe);
             let p_wg_count = (params.people_count + 63) / 64;
             if p_wg_count > 0 {
                 pass.dispatch_workgroups(p_wg_count, 1, 1);
+            }
+
+            // 3. Update Roads pass (consumes congestion buffer)
+            pass.set_pipeline(update_roads_pipe);
+            let r_wg_count = (params.segments_count + 63) / 64;
+            if r_wg_count > 0 {
+                pass.dispatch_workgroups(r_wg_count, 1, 1);
             }
         }
 
@@ -580,4 +636,5 @@ pub fn update_gpu_sim_params(
     gpu_params.buildings_tex_h = buildings.tex_height;
     gpu_params.roads_tex_w = roads.tex_width;
     gpu_params.buildings_count = buildings.items.len() as u32;
+    gpu_params.segments_count = roads.segments.len() as u32;
 }
