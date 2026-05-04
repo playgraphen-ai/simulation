@@ -45,7 +45,7 @@ struct SimParams {
 
 fn road_coords(sid: u32) -> array<vec2<i32>, 2> {
     let base = i32(sid * 2u);
-    let w = i32(params.roads_tex_w);
+    let w = max(1, i32(params.roads_tex_w));
     let c0 = vec2<i32>(base % w, base / w);
     let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
     return array<vec2<i32>, 2>(c0, c1);

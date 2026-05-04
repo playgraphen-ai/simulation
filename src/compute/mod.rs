@@ -38,11 +38,12 @@ pub struct ScheduleConfig {
     pub people_logic_frames: u32,
     pub roads_frames: u32,
     pub pathfind_frames: u32,
+    pub stats_frames: u32,
 }
 
 impl Default for ScheduleConfig {
     fn default() -> Self {
-        Self { buildings_frames: 10, people_logic_frames: 10, roads_frames: 10, pathfind_frames: 60 }
+        Self { buildings_frames: 10, people_logic_frames: 10, roads_frames: 10, pathfind_frames: 59, stats_frames: 1 }
     }
 }
 
@@ -59,7 +60,7 @@ impl Default for SimScheduleState {
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        let cycle_frames = config.buildings_frames + config.people_logic_frames + config.roads_frames + config.pathfind_frames;
+        let cycle_frames = config.buildings_frames + config.people_logic_frames + config.roads_frames + config.pathfind_frames + config.stats_frames;
         Self { config, current_frame: 0, cycle_frames }
     }
 }
@@ -161,6 +162,12 @@ fn sync_gpu_textures_and_params(
     
     if schedule.current_frame < c.buildings_frames + c.people_logic_frames + c.roads_frames {
         path_params.do_dispatch = 0;
+    }
+
+    if schedule.current_frame >= schedule.cycle_frames - c.stats_frames {
+        gpu_params.do_readback = 1;
+    } else {
+        gpu_params.do_readback = 0;
     }
 
     if schedule.current_frame == c.buildings_frames {

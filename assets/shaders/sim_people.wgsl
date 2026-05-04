@@ -53,7 +53,7 @@ struct PathRequestQueue {
 
 fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
     let base = i32(pid * 3u);
-    let w = i32(params.people_tex_w);
+    let w = max(1, i32(params.people_tex_w));
     let c0 = vec2<i32>(base % w, base / w);
     let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
     let c2 = vec2<i32>((base + 2) % w, (base + 2) / w);
@@ -62,7 +62,7 @@ fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
 
 fn building_coords(bid: u32) -> array<vec2<i32>, 3> {
     let base = i32(bid * 3u);
-    let w = i32(params.buildings_tex_w);
+    let w = max(1, i32(params.buildings_tex_w));
     let c0 = vec2<i32>(base % w, base / w);
     let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
     let c2 = vec2<i32>((base + 2) % w, (base + 2) / w);
@@ -71,7 +71,7 @@ fn building_coords(bid: u32) -> array<vec2<i32>, 3> {
 
 fn road_coords(sid: u32) -> array<vec2<i32>, 2> {
     let base = i32(sid * 2u);
-    let w = i32(params.roads_tex_w);
+    let w = max(1, i32(params.roads_tex_w));
     let c0 = vec2<i32>(base % w, base / w);
     let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
     return array<vec2<i32>, 2>(c0, c1);
@@ -266,7 +266,8 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             // --- QUEUE INITIAL PATH REQUEST ---
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
-            if req_idx < 16384u {
+            let max_queue = 16384u;
+            if req_idx < max_queue {
                 path_queue.requests[req_idx] = PathRequest(u32(home_seg), target_seg, pid);
             }
             person_paths[pid * 256u] = 0xFFFFFFFFu;
@@ -350,7 +351,8 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             // Queue path request
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
-            if req_idx < 16384u {
+            let max_queue = 16384u;
+            if req_idx < max_queue {
                 path_queue.requests[req_idx] = PathRequest(start_seg, target_seg, pid);
             }
 

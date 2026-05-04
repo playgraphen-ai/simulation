@@ -2,5 +2,6 @@
   "buildings_frames": 10,
   "people_logic_frames": 10,
   "roads_frames": 10,
-  "pathfind_frames": 60
+  "pathfind_frames": 59,
+  "stats_frames": 1
 }

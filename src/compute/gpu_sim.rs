@@ -33,16 +33,17 @@ fn prepare_readback_buffers(
     let unaligned_p_row = params.people_tex_w * 16;
     let align = 256;
     let aligned_p_row = (unaligned_p_row + align - 1) & !(align - 1);
+    let max_p_size = 65536u64 * 16u64; // Max people * 16 bytes
     let p_size = (aligned_p_row * params.people_tex_h) as u64;
 
-    if p_size > 0 && readback.people_size != p_size {
+    if max_p_size > 0 && readback.people_size != max_p_size {
         readback.people_buffer = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_people_readback_buffer"),
-            size: p_size,
+            size: max_p_size,
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
         }));
-        readback.people_size = p_size;
+        readback.people_size = max_p_size;
     }
 
     let mut b_w = 128; // fallback
@@ -52,15 +53,16 @@ fn prepare_readback_buffers(
     let mut b_h = 128; // fallback
     if params.buildings_tex_h > 0 { b_h = params.buildings_tex_h; }
     let b_size = (aligned_b_row * b_h) as u64;
+    let max_b_size = 65536u64 * 16u64; // max buildings * 16 bytes
 
-    if b_size > 0 && readback.buildings_size != b_size {
+    if max_b_size > 0 && readback.buildings_size != max_b_size {
         readback.buildings_buffer = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_buildings_readback_buffer"),
-            size: b_size,
+            size: max_b_size,
             usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
             mapped_at_creation: false,
         }));
-        readback.buildings_size = b_size;
+        readback.buildings_size = max_b_size;
     }
 }
 
@@ -165,6 +167,7 @@ pub struct GpuSimParams {
     pub r_start: u32,
     pub r_count: u32,
     pub cycle_frames: u32,
+    pub do_readback: u32,
     pub _pad: u32,
 }
 
@@ -198,6 +201,7 @@ impl Default for GpuSimParams {
             r_start: 0,
             r_count: 0,
             cycle_frames: 90,
+            do_readback: 0,
             _pad: 0,
         }
     }
@@ -484,46 +488,48 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         }
 
         // Copy People
-        if let (Some(people_h), Some(p_buf)) = (textures.people.as_ref(), readback.people_buffer.as_ref()) {
-            if let Some(gpu_img) = gpu_images.get(people_h) {
-                render_context.command_encoder().copy_texture_to_buffer(
-                    gpu_img.texture.as_image_copy(),
-                    TexelCopyBufferInfo {
-                        buffer: p_buf,
-                        layout: TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some({
-                                let unaligned = gpu_img.texture.width() * 16;
-                                let align = 256;
-                                (unaligned + align - 1) & !(align - 1)
-                            }),
-                            rows_per_image: None,
+        if params.do_readback > 0 {
+            if let (Some(people_h), Some(p_buf)) = (textures.people.as_ref(), readback.people_buffer.as_ref()) {
+                if let Some(gpu_img) = gpu_images.get(people_h) {
+                    render_context.command_encoder().copy_texture_to_buffer(
+                        gpu_img.texture.as_image_copy(),
+                        TexelCopyBufferInfo {
+                            buffer: p_buf,
+                            layout: TexelCopyBufferLayout {
+                                offset: 0,
+                                bytes_per_row: Some({
+                                    let unaligned = gpu_img.texture.width() * 16;
+                                    let align = 256;
+                                    (unaligned + align - 1) & !(align - 1)
+                                }),
+                                rows_per_image: None,
+                            },
                         },
-                    },
-                    gpu_img.texture.size(),
-                );
+                        gpu_img.texture.size(),
+                    );
+                }
             }
-        }
 
-        // Copy Buildings
-        if let (Some(buildings_h), Some(b_buf)) = (textures.buildings.as_ref(), readback.buildings_buffer.as_ref()) {
-            if let Some(gpu_img) = gpu_images.get(buildings_h) {
-                render_context.command_encoder().copy_texture_to_buffer(
-                    gpu_img.texture.as_image_copy(),
-                    TexelCopyBufferInfo {
-                        buffer: b_buf,
-                        layout: TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some({
-                                let unaligned = gpu_img.texture.width() * 16;
-                                let align = 256;
-                                (unaligned + align - 1) & !(align - 1)
-                            }),
-                            rows_per_image: None,
+            // Copy Buildings
+            if let (Some(buildings_h), Some(b_buf)) = (textures.buildings.as_ref(), readback.buildings_buffer.as_ref()) {
+                if let Some(gpu_img) = gpu_images.get(buildings_h) {
+                    render_context.command_encoder().copy_texture_to_buffer(
+                        gpu_img.texture.as_image_copy(),
+                        TexelCopyBufferInfo {
+                            buffer: b_buf,
+                            layout: TexelCopyBufferLayout {
+                                offset: 0,
+                                bytes_per_row: Some({
+                                    let unaligned = gpu_img.texture.width() * 16;
+                                    let align = 256;
+                                    (unaligned + align - 1) & !(align - 1)
+                                }),
+                                rows_per_image: None,
+                            },
                         },
-                    },
-                    gpu_img.texture.size(),
-                );
+                        gpu_img.texture.size(),
+                    );
+                }
             }
         }
 
@@ -538,6 +544,9 @@ fn map_and_send_readback(
     sender_b: Res<BuildingsSender>,
     params: Res<GpuSimParams>,
 ) {
+    if params.do_readback == 0 {
+        return;
+    }
     let (Some(p_buf), Some(b_buf)) = (readback.people_buffer.as_ref(), readback.buildings_buffer.as_ref()) else { return; };
     
     let tx_p = sender_p.0.lock().unwrap().clone();
@@ -595,8 +604,6 @@ fn map_and_send_readback(
             let _ = tx_b.send(rows_b);
         }
     });
-    
-    let _ = render_device.poll(bevy::render::render_resource::PollType::wait_indefinitely());
 }
 
 pub fn apply_gpu_readback(

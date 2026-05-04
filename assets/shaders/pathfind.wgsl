@@ -41,7 +41,7 @@ struct PathRequestQueue {
 
 fn seg_coords(seg: u32) -> array<vec2<i32>, 2> {
     let base = seg * 2u;
-    let w = params.roads_tex_w;
+    let w = max(1u, params.roads_tex_w);
     let c0 = vec2<i32>(i32(base % w), i32(base / w));
     let c1 = vec2<i32>(i32((base + 1u) % w), i32((base + 1u) / w));
     return array<vec2<i32>, 2>(c0, c1);
