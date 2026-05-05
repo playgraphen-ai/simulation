@@ -10,7 +10,7 @@ pub struct MenuSettings {
 
 impl Default for MenuSettings {
     fn default() -> Self {
-        Self { grid_x: 20, grid_y: 16, population: 1000 }
+        Self { grid_x: 4, grid_y: 4, population: 100 }
     }
 }
 

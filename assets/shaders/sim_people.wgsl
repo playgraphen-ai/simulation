@@ -30,7 +30,11 @@ struct SimParams {
     reset_stats: u32,
     grid_w: u32,
     grid_h: u32,
+    entry_seg: u32,
+    collisions_enabled: f32,
     _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 };
 
 struct PathRequest {
@@ -150,11 +154,17 @@ fn main_people_occupancy(@builtin(global_invocation_id) gid: vec3<u32>) {
             if start_at_b { frac = rem; } else { frac = 1.0 - rem; }
         }
 
-        // Determine tile
+        // Determine tile with right-hand offset
         let ax = r_tex0.x; let ay = r_tex0.y;
         let bx = r_tex0.z; let by = r_tex0.w;
-        let tx = u32(mix(ax, bx, frac));
-        let ty = u32(mix(ay, by, frac));
+        
+        let dir = normalize(vec2<f32>(bx - ax, by - ay));
+        let side = vec2<f32>(-dir.y, dir.x);
+        let offset = select(0.35, -0.35, start_at_b);
+        
+        let pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), frac) + side * offset;
+        let tx = u32(pos.x + 0.5);
+        let ty = u32(pos.y + 0.5);
         
         let idx = tx + ty * params.grid_w;
         if idx < params.grid_w * params.grid_h {
@@ -251,29 +261,60 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
 
                 let ax = r_tex0.x; let ay = r_tex0.y;
                 let bx = r_tex0.z; let by = r_tex0.w;
-                let tx = u32(mix(ax, bx, ahead_frac));
-                let ty = u32(mix(ay, by, ahead_frac));
+                
+                let dir = normalize(vec2<f32>(bx - ax, by - ay));
+                let side = vec2<f32>(-dir.y, dir.x);
+                let offset = select(0.35, -0.35, start_at_b);
+                
+                let current_pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), current_frac) + side * offset;
+                let current_idx = u32(current_pos.x + 0.5) + u32(current_pos.y + 0.5) * params.grid_w;
+
+                let pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), ahead_frac) + side * offset;
+                let tx = u32(pos.x + 0.5);
+                let ty = u32(pos.y + 0.5);
                 let ahead_idx = tx + ty * params.grid_w;
 
                 var is_blocked = false;
-                if ahead_idx < params.grid_w * params.grid_h {
-                    if atomicLoad(&occupancy[ahead_idx]) > 0u {
-                        is_blocked = true;
-                    }
-                }
-
-                // If at the end of segment, check next segment
-                if (start_at_b && ahead_frac <= 0.01) || (!start_at_b && ahead_frac >= 0.99) {
-                    let next_step = current_step + 1u;
-                    let next_path_seg = person_paths[base_idx + next_step];
-                    if next_path_seg != 0xFFFFFFFFu {
-                        let nr_coords = road_coords(next_path_seg);
-                        let nr_tex0 = textureLoad(roads_tex, nr_coords[0]);
-                        // Check middle of next segment's first link
-                        let ntx = u32(mix(nr_tex0.x, nr_tex0.z, 0.5));
-                        let nty = u32(mix(nr_tex0.y, nr_tex0.w, 0.5));
-                        if atomicLoad(&occupancy[ntx + nty * params.grid_w]) > 0u {
+                if params.collisions_enabled > 0.5 {
+                    if ahead_idx < params.grid_w * params.grid_h {
+                        let occ = atomicLoad(&occupancy[ahead_idx]);
+                        if (ahead_idx != current_idx && occ > 0u) {
                             is_blocked = true;
+                        }
+                    }
+
+                    // If at the end of segment, check next segment
+                    if !is_blocked && ((start_at_b && ahead_frac <= 0.01) || (!start_at_b && ahead_frac >= 0.99)) {
+                        let next_step = current_step + 1u;
+                        let next_path_seg = person_paths[base_idx + next_step];
+                        if next_path_seg != 0xFFFFFFFFu {
+                            let nr_coords = road_coords(next_path_seg);
+                            let n_tex0 = textureLoad(roads_tex, nr_coords[0]);
+                            let n_ax = n_tex0.x; let n_ay = n_tex0.y;
+                            let n_bx = n_tex0.z; let n_by = n_tex0.w;
+                            
+                            var next_start_at_b = false;
+                            let nseg_b = vec2<f32>(n_tex0.z, n_tex0.w);
+                            if (r_tex0.x == nseg_b.x && r_tex0.y == nseg_b.y) || (r_tex0.z == nseg_b.x && r_tex0.w == nseg_b.y) {
+                                next_start_at_b = true;
+                            }
+                            
+                            let n_dir = normalize(vec2<f32>(n_bx - n_ax, n_by - n_ay));
+                            let n_side = vec2<f32>(-n_dir.y, n_dir.x);
+                            let n_offset = select(0.35, -0.35, next_start_at_b);
+                            let n_frac = select(0.1, 0.9, next_start_at_b);
+                            
+                            let n_pos = mix(vec2<f32>(n_ax, n_ay), vec2<f32>(n_bx, n_by), n_frac) + n_side * n_offset;
+                            let ntx = u32(n_pos.x + 0.5);
+                            let nty = u32(n_pos.y + 0.5);
+                            let n_idx = ntx + nty * params.grid_w;
+                            
+                            if n_idx < params.grid_w * params.grid_h {
+                                let n_occ = atomicLoad(&occupancy[n_idx]);
+                                if (n_idx != current_idx && n_occ > 0u) {
+                                    is_blocked = true;
+                                }
+                            }
                         }
                     }
                 }
@@ -432,9 +473,13 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let target_seg = u32(target_b_tex1.w);
             let target_t = target_b_tex2.z;
 
+            // Start at the map edge
+            let start_seg = params.entry_seg;
+            let start_t = 0.0;
+
             texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, 18.0 + rand(&rng_state) * 57.0, f32(work_id), f32(home_id));
             texel1 = vec4<f32>(f32(work_id), 0.0, -10.0, 0.0); // Travel, waiting for path
-            texel2 = vec4<f32>(home_seg, home_seg, home_t, target_t);
+            texel2 = vec4<f32>(f32(start_seg), f32(start_seg), start_t, target_t);
             
             // Re-load variables for simulation
             money = texel0.x;
@@ -443,7 +488,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
             let max_queue = 16384u;
             if req_idx < max_queue {
-                path_queue.requests[req_idx] = PathRequest(u32(home_seg), target_seg, pid, 0u);
+                path_queue.requests[req_idx] = PathRequest(u32(start_seg), target_seg, pid, 0u);
             }
             person_paths[pid * 256u] = 0xFFFFFFFFu;
             

@@ -22,14 +22,9 @@ use crate::ui::inspector::{Selection, SelectedObj};
 
 /// Tile coordinates of the trunk and side-streets so other systems can
 /// reference them if needed.
-#[allow(dead_code)]
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct ScenarioLayout {
-    pub trunk_y: u32,
-    pub res_x: u32,
-    pub off_x: u32,
-    pub shop_x: u32,
-    pub side_len: u32,
+    pub entry_seg: u32,
 }
 
 pub fn build_starter_scenario(
@@ -56,10 +51,15 @@ pub fn build_starter_scenario(
 
     // 1. Build the grid of roads
     // Horizontal roads
+    let mid_gy = grid_size_y / 2;
     for gy in 0..=grid_size_y {
         let y = start_y + gy * block_size;
         let mut prev = None;
-        for x in start_x..=(start_x + grid_size_x * block_size) {
+        
+        let row_start_x = if gy == mid_gy { 0 } else { start_x };
+        let row_end_x = start_x + grid_size_x * block_size;
+
+        for x in row_start_x..=row_end_x {
             if grid.get(x, y) == Some(Tile::Water) {
                 prev = None; // break the road
                 continue;
@@ -93,9 +93,15 @@ pub fn build_starter_scenario(
     }
 
     let tile_to_seg = roads.rebuild_topology();
+    let mut entry_seg = 0;
     for ((tx, ty), seg_id) in tile_to_seg {
         grid.set(tx, ty, Tile::Road(seg_id));
+        if tx == 0 && ty == start_y + mid_gy * block_size {
+            entry_seg = seg_id;
+        }
     }
+
+    commands.insert_resource(ScenarioLayout { entry_seg });
 
     // 2. Zone the blocks
     for gy in 0..grid_size_y {

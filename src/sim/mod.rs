@@ -92,6 +92,7 @@ pub struct SimSettings {
     pub rent_cost: f32,
     pub work_salary: f32,
     pub shop_cost: f32,
+    pub collisions_enabled: f32, // 1.0 for true, 0.0 for false
 }
 
 impl Default for SimSettings {
@@ -101,6 +102,7 @@ impl Default for SimSettings {
             rent_cost: 20.0,
             work_salary: 50.0,
             shop_cost: 30.0,
+            collisions_enabled: 1.0,
         }
     }
 }

@@ -24,8 +24,18 @@ struct SimParams {
     segments_count: u32,
     spawn_count: u32,
     spawn_start_index: u32,
+    b_start: u32,
+    b_count: u32,
+    logic_start: u32,
+    logic_count: u32,
+    r_start: u32,
+    r_count: u32,
+    cycle_frames: u32,
+    do_readback: u32,
+    reset_stats: u32,
     grid_w: u32,
     grid_h: u32,
+    entry_seg: u32,
 };
 
 struct PathRequest {
@@ -175,8 +185,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let home_coords = building_coords(home_id);
     let h_tex1 = textureLoad(buildings_tex, home_coords[1]);
     let h_tex2 = textureLoad(buildings_tex, home_coords[2]);
-    let home_seg = h_tex1.w;
-    let home_t = h_tex2.z;
+    let home_seg_orig = h_tex1.w;
+    let home_t_orig = h_tex2.z;
 
     let work_coords = building_coords(work_id);
     let w_tex1 = textureLoad(buildings_tex, work_coords[1]);
@@ -187,11 +197,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let money = 50.0 + rand(&rng_state) * 450.0;
     let age = 18.0 + rand(&rng_state) * 57.0;
 
+    // Start at the map edge (entry_seg, t=0.0)
+    let start_seg = params.entry_seg;
+    let start_t = 0.0;
+
     // activity_code: 0.0 = Travel (ACT_TRAVEL)
     // activity_time: -10.0 = Waiting for path timeout
     let texel0 = vec4<f32>(money, age, f32(work_id), f32(home_id));
     let texel1 = vec4<f32>(f32(work_id), 0.0, -10.0, 0.0);
-    let texel2 = vec4<f32>(home_seg, home_seg, home_t, target_t);
+    let texel2 = vec4<f32>(f32(start_seg), f32(start_seg), start_t, target_t);
 
     textureStore(people_tex, p_coords[0], texel0);
     textureStore(people_tex, p_coords[1], texel1);
@@ -201,7 +215,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let req_idx = atomicAdd(&path_queue.count_x, 1u);
     let max_queue = 16384u;
     if req_idx < max_queue {
-        path_queue.requests[req_idx] = PathRequest(u32(home_seg), u32(target_seg), pid, 0u);
+        path_queue.requests[req_idx] = PathRequest(u32(start_seg), u32(target_seg), pid, 0u);
     }
 
     // Reset path buffer for this person

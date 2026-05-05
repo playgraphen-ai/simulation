@@ -130,6 +130,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
             let d = normalize(dir);
             let up = vec3<f32>(0.0, 1.0, 0.0);
             let right = normalize(cross(up, d));
+            
+            // Offset to the right lane
+            world_pos = world_pos + right * 0.25;
+
             let real_up = cross(d, right);
             rot_matrix = mat3x3<f32>(
                 right.x, real_up.x, d.x,

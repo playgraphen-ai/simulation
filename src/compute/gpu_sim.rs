@@ -206,7 +206,11 @@ pub struct GpuSimParams {
     pub reset_stats: u32,
     pub grid_w: u32,
     pub grid_h: u32,
+    pub entry_seg: u32,
+    pub collisions_enabled: f32,
     pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
 }
 
 impl Default for GpuSimParams {
@@ -243,7 +247,11 @@ impl Default for GpuSimParams {
             reset_stats: 0,
             grid_w: 128,
             grid_h: 128,
+            entry_seg: 0,
+            collisions_enabled: 1.0,
             _pad0: 0,
+            _pad1: 0,
+            _pad2: 0,
         }
     }
 }
@@ -867,6 +875,7 @@ pub fn update_gpu_sim_params(
     roads: &crate::sim::roads::RoadData,
     grid: &crate::sim::grid::CityGrid,
     gpu_params: &mut GpuSimParams,
+    entry_seg: u32,
 ) {
     gpu_params.dt = time.delta_secs();
     gpu_params.home_duration = durations.home;
@@ -888,4 +897,6 @@ pub fn update_gpu_sim_params(
     gpu_params.segments_count = roads.segments.len() as u32;
     gpu_params.grid_w = grid.width;
     gpu_params.grid_h = grid.height;
+    gpu_params.entry_seg = entry_seg;
+    gpu_params.collisions_enabled = settings.collisions_enabled;
 }

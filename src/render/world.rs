@@ -230,6 +230,7 @@ fn sync_road_view(
 
         let mut tf = Transform::from_xyz(x, y, z).with_rotation(Quat::from_rotation_y(-angle));
         tf.scale.x = len;
+        tf.scale.z = 2.0; // 2 tiles wide (visually)
 
         // Pitch road if there is an elevation difference
         let pitch = (elev_b - elev_a).atan2(len);

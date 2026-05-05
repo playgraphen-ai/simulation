@@ -117,6 +117,7 @@ fn sync_gpu_textures_and_params(
     mut gpu_params: ResMut<gpu_sim::GpuSimParams>,
     mut path_params: ResMut<gpu_pathfinding::PathParams>,
     schedule: Res<SimScheduleState>,
+    scenario: Option<Res<crate::sim::scenario::ScenarioLayout>>,
 ) {
     if let Some(dt) = dt {
         gpu_tex.people = Some(dt.people.clone());
@@ -124,7 +125,8 @@ fn sync_gpu_textures_and_params(
         gpu_tex.buildings = Some(dt.buildings.clone());
         gpu_tex.road_points = Some(dt.road_points.clone());
     }
-    gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &grid, &mut gpu_params);
+    let entry_seg = scenario.map(|s| s.entry_seg).unwrap_or(0);
+    gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &grid, &mut gpu_params, entry_seg);
     
     let frame = schedule.current_frame;
 
