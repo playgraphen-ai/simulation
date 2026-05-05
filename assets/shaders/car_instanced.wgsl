@@ -51,7 +51,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let activity = tex1.y;
     let activity_time = tex1.z;
     let current_seg = u32(tex2.x);
-    let prev_seg = u32(tex2.y);
+    let prev_seg_raw = tex2.y;
 
     var world_pos = vec3<f32>(0.0, -10000.0, 0.0);
     var rot_matrix = mat3x3<f32>(
@@ -69,29 +69,31 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         let rtex0 = textureLoad(roads_tex, rc0, 0);
         let rtex1 = textureLoad(roads_tex, rc1, 0);
         
-        let seg_len = max(0.01, rtex1.w); // total length is tex1.w (was tex1.y)
+        let seg_len = max(0.01, rtex1.w); // total length is tex1.w
         let links_offset = u32(rtex1.y);
         let links_count = u32(rtex1.z);
         
         var start_at_b = false;
-        if prev_seg != current_seg && prev_seg != 0xFFFFFFFFu {
-            let pbase = i32(prev_seg * 4u);
-            let pc0 = vec2<i32>(pbase % rw, pbase / rw);
-            let ptex0 = textureLoad(roads_tex, pc0, 0);
-            let pa = vec2<f32>(ptex0.x, ptex0.y);
-            let pb = vec2<f32>(ptex0.z, ptex0.w);
-            let rtex0 = textureLoad(roads_tex, rc0, 0);
-            let seg_b = vec2<f32>(rtex0.z, rtex0.w);
-            if pa.x == seg_b.x && pa.y == seg_b.y || pb.x == seg_b.x && pb.y == seg_b.y {
-                start_at_b = true;
-            }
+        if prev_seg_raw >= 1000000.0 {
+            start_at_b = true;
         }
 
-        // Si activity_time est négatif (timeout/attente de path), on reste au début du segment
-        var time_val = max(0.0, activity_time);
-        var frac = 1.0 - clamp(time_val / seg_len, 0.0, 1.0);
-        if start_at_b {
-            frac = 1.0 - frac;
+        var frac = 0.0;
+        if activity_time < 0.0 {
+            frac = tex2.z; // start_t
+        } else {
+            var time_val = max(0.0, activity_time);
+            var remaining_frac = clamp(time_val / seg_len, 0.0, 1.0);
+            
+            if start_at_b {
+                // Moving B -> A. Target is A (0.0).
+                // Remaining fraction to A is remaining_frac.
+                frac = remaining_frac;
+            } else {
+                // Moving A -> B. Target is B (1.0).
+                // Remaining fraction to B is remaining_frac.
+                frac = 1.0 - remaining_frac;
+            }
         }
 
         // Interpolation along multi-link segment
@@ -119,15 +121,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         world_pos = vec3<f32>(x, y, z);
 
         var dir = vec3<f32>(p1.x - p0.x, el_b - el_a, p1.y - p0.y);
-        if start_at_b && frac < 0.001 {
-            // Special case for start at B: direction is from last-1 to last
-            let idxl = links_offset + safe_links_count - 1u;
-            let idxp = links_offset + max(0u, safe_links_count - 2u);
-            let cl = vec2<i32>(i32(idxl % rw_pts), i32(idxl / rw_pts));
-            let cp = vec2<i32>(i32(idxp % rw_pts), i32(idxp / rw_pts));
-            let plast = textureLoad(road_points_tex, cl, 0).xy;
-            let pprev = textureLoad(road_points_tex, cp, 0).xy;
-            dir = vec3<f32>(plast.x - pprev.x, 0.0, plast.y - pprev.y);
+        if start_at_b {
+            dir = -dir;
         }
         
         let len_sq = dot(dir, dir);

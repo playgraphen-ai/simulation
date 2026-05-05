@@ -30,6 +30,7 @@ struct PathRequest {
     start: u32,
     target_seg: u32,
     person_id: u32,
+    pad: u32,
 };
 
 struct PathRequestQueue {
@@ -135,11 +136,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p_coords = person_coords(pid);
     let home_coords = building_coords(home_id);
     let h_tex1 = textureLoad(buildings_tex, home_coords[1]);
+    let h_tex2 = textureLoad(buildings_tex, home_coords[2]);
     let home_seg = h_tex1.w;
+    let home_t = h_tex2.z;
 
     let work_coords = building_coords(work_id);
     let w_tex1 = textureLoad(buildings_tex, work_coords[1]);
+    let w_tex2 = textureLoad(buildings_tex, work_coords[2]);
     let target_seg = w_tex1.w;
+    let target_t = w_tex2.z;
 
     let money = 50.0 + rand(&rng_state) * 450.0;
     let age = 18.0 + rand(&rng_state) * 57.0;
@@ -148,7 +153,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // activity_time: -10.0 = Waiting for path timeout
     let texel0 = vec4<f32>(money, age, f32(work_id), f32(home_id));
     let texel1 = vec4<f32>(f32(work_id), 0.0, -10.0, 0.0);
-    let texel2 = vec4<f32>(home_seg, home_seg, 0.0, 0.0);
+    let texel2 = vec4<f32>(home_seg, home_seg, home_t, target_t);
 
     textureStore(people_tex, p_coords[0], texel0);
     textureStore(people_tex, p_coords[1], texel1);
@@ -158,7 +163,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let req_idx = atomicAdd(&path_queue.count_x, 1u);
     let max_queue = 16384u;
     if req_idx < max_queue {
-        path_queue.requests[req_idx] = PathRequest(u32(home_seg), u32(target_seg), pid);
+        path_queue.requests[req_idx] = PathRequest(u32(home_seg), u32(target_seg), pid, 0u);
     }
 
     // Reset path buffer for this person

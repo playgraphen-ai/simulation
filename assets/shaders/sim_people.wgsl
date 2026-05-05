@@ -150,58 +150,124 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
         let current_path_seg = person_paths[base_idx + current_step];
 
         if current_path_seg != 0xFFFFFFFFu {
+            let r_coords = road_coords(current_path_seg);
+            let r_tex1 = textureLoad(roads_tex, r_coords[1]);
+            let seg_len = max(0.5, r_tex1.w);
+
+            let real_prev_seg = u32(select(prev_seg, prev_seg - 1000000.0, prev_seg >= 1000000.0));
+
+            // Determine if we are travelling from A to B or B to A
+            var start_at_b = false;
+            if real_prev_seg != u32(current_seg) && real_prev_seg != 0xFFFFFFFFu {
+                let p_coords = road_coords(real_prev_seg);
+                let p_tex0 = textureLoad(roads_tex, p_coords[0]);
+                let r_tex0 = textureLoad(roads_tex, r_coords[0]);
+                let seg_b = vec2<f32>(r_tex0.z, r_tex0.w);
+                if (p_tex0.x == seg_b.x && p_tex0.y == seg_b.y) || (p_tex0.z == seg_b.x && p_tex0.w == seg_b.y) {
+                    start_at_b = true;
+                }
+            } else if real_prev_seg == u32(current_seg) {
+                // First segment of a new path! Look ahead to determine direction.
+                let next_step = current_step + 1u;
+                let next_path_seg = person_paths[base_idx + next_step];
+                if next_path_seg != 0xFFFFFFFFu {
+                    let r_tex0 = textureLoad(roads_tex, r_coords[0]);
+                    let nr_coords = road_coords(next_path_seg);
+                    let nr_tex0 = textureLoad(roads_tex, nr_coords[0]);
+                    let seg_a = vec2<f32>(r_tex0.x, r_tex0.y);
+                    // If my A is connected to next segment, I must be starting at B and moving to A.
+                    if (nr_tex0.x == seg_a.x && nr_tex0.y == seg_a.y) || (nr_tex0.z == seg_a.x && nr_tex0.w == seg_a.y) {
+                        start_at_b = true;
+                    }
+                } else {
+                    // Only one segment in path.
+                    if texel2.z > texel2.w {
+                        start_at_b = true;
+                    }
+                }
+            }
+
             if activity_time < 0.0 {
                 // Just received path, start on first segment!
-                let r_coords = road_coords(current_path_seg);
-                let r_tex1 = textureLoad(roads_tex, r_coords[1]);
-                activity_time = max(0.5, r_tex1.w); // length is tex1.w
+                let start_t = texel2.z;
+                if start_at_b {
+                    // Start at B means moving towards A.
+                    // The distance to cover is from start_t (a fraction of seg_len from A) to A (0.0).
+                    // So we must travel `seg_len * start_t`.
+                    // But in our model, activity_time is the distance remaining on the current segment.
+                    activity_time = seg_len * start_t;
+                    prev_seg = f32(current_path_seg) + 1000000.0;
+                } else {
+                    // Start at A means moving towards B.
+                    // The distance to cover is from start_t to B (1.0).
+                    // So we must travel `seg_len * (1.0 - start_t)`.
+                    activity_time = seg_len * (1.0 - start_t);
+                    prev_seg = f32(current_path_seg);
+                }
                 current_seg = f32(current_path_seg);
-                prev_seg = current_seg; // No previous segment yet
             } else {
-                let r_coords = road_coords(current_path_seg);
-                let r_tex1 = textureLoad(roads_tex, r_coords[1]);
                 let speed = max(0.05, r_tex1.x); // speed_mean is tex1.x
                 
-                // Write to congestion buffer: Simple increment instead of bitmask
+                // Write to congestion buffer
                 let safe_seg = min(current_path_seg, 65535u);
                 atomicAdd(&congestion[safe_seg], 1u);
 
                 activity_time = activity_time - speed * params.dt;
 
-                if activity_time <= 0.0 {
-                    let overshoot = activity_time; // Negative value representing distance traveled past the node
-                    path_cursor = path_cursor + 1.0;
-                    let next_step = u32(path_cursor);
-                    
-                    if next_step < 256u && base_idx + next_step < max_paths {
-                        let next_path_seg = person_paths[base_idx + next_step];
-                        if next_path_seg != 0xFFFFFFFFu {
-                            let nr_coords = road_coords(next_path_seg);
-                            let nr_tex1 = textureLoad(roads_tex, nr_coords[1]);
-                            activity_time = max(0.5, nr_tex1.w) + overshoot; // Carry over distance
-                            prev_seg = current_seg;
-                            current_seg = f32(next_path_seg);
-                        } else {
-                            // Arrived!
-                            let dest_b_coords = building_coords(u32(destination));
-                            let b_tex0 = textureLoad(buildings_tex, dest_b_coords[0]);
-                            var b_tex1 = textureLoad(buildings_tex, dest_b_coords[1]);
-
-                            let btype = b_tex0.z;
-                            if btype == 0.0 { activity = ACT_HOME; activity_time = params.home_duration; }
-                            else if btype == 1.0 { activity = ACT_WORK; activity_time = params.work_duration; }
-                            else if btype == 2.0 { activity = ACT_SHOP; activity_time = params.shop_duration; }
-                            else { activity = ACT_HOME; activity_time = params.home_duration; }
-
-                            b_tex1.y = b_tex1.y + 1.0;
-                            textureStore(buildings_tex, dest_b_coords[1], b_tex1);
-                            path_cursor = 0.0;
-                        }
+                // Determine stop threshold for last segment
+                var stop_at = 0.0;
+                let next_step = u32(path_cursor) + 1u;
+                let next_path_seg = person_paths[base_idx + next_step];
+                if next_path_seg == 0xFFFFFFFFu {
+                    let target_t = texel2.w;
+                    if start_at_b {
+                        stop_at = seg_len * target_t;
                     } else {
-                        // Max path len reached without arriving? Fallback.
-                        activity = ACT_HOME;
-                        activity_time = params.home_duration;
-                        destination = home;
+                        stop_at = seg_len * (1.0 - target_t);
+                    }
+                }
+
+                if activity_time <= stop_at {
+                    let overshoot = activity_time - stop_at; 
+                    path_cursor = path_cursor + 1.0;
+                    
+                    if next_path_seg != 0xFFFFFFFFu {
+                        let nr_coords = road_coords(next_path_seg);
+                        let nr_tex1 = textureLoad(roads_tex, nr_coords[1]);
+                        let next_seg_len = max(0.5, nr_tex1.w);
+
+                        // Determine start_at_b for the NEXT segment to initialize its activity_time correctly
+                        var next_start_at_b = false;
+                        let r_tex0 = textureLoad(roads_tex, r_coords[0]);
+                        let nr_tex0 = textureLoad(roads_tex, nr_coords[0]);
+                        let nseg_b = vec2<f32>(nr_tex0.z, nr_tex0.w);
+                        if (r_tex0.x == nseg_b.x && r_tex0.y == nseg_b.y) || (r_tex0.z == nseg_b.x && r_tex0.w == nseg_b.y) {
+                            next_start_at_b = true;
+                        }
+
+                        if next_start_at_b {
+                            activity_time = next_seg_len + overshoot;
+                            prev_seg = f32(current_path_seg) + 1000000.0;
+                        } else {
+                            activity_time = next_seg_len + overshoot;
+                            prev_seg = f32(current_path_seg);
+                        }
+                        current_seg = f32(next_path_seg);
+                    } else {
+                        // Arrived!
+                        let dest_b_coords = building_coords(u32(destination));
+                        let b_tex0 = textureLoad(buildings_tex, dest_b_coords[0]);
+                        var b_tex1 = textureLoad(buildings_tex, dest_b_coords[1]);
+
+                        let btype = b_tex0.z;
+                        if btype == 0.0 { activity = ACT_HOME; activity_time = params.home_duration; }
+                        else if btype == 1.0 { activity = ACT_WORK; activity_time = params.work_duration; }
+                        else if btype == 2.0 { activity = ACT_SHOP; activity_time = params.shop_duration; }
+                        else { activity = ACT_HOME; activity_time = params.home_duration; }
+
+                        b_tex1.y = b_tex1.y + 1.0;
+                        textureStore(buildings_tex, dest_b_coords[1], b_tex1);
+                        path_cursor = 0.0;
                     }
                 }
             }
@@ -290,14 +356,19 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             let home_coords = building_coords(home_id);
             let h_tex1 = textureLoad(buildings_tex, home_coords[1]);
+            let h_tex2 = textureLoad(buildings_tex, home_coords[2]);
             let home_seg = h_tex1.w;
+            let home_t = h_tex2.z;
+
             let target_b_coords = building_coords(work_id);
             let target_b_tex1 = textureLoad(buildings_tex, target_b_coords[1]);
+            let target_b_tex2 = textureLoad(buildings_tex, target_b_coords[2]);
             let target_seg = u32(target_b_tex1.w);
+            let target_t = target_b_tex2.z;
 
             texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, 18.0 + rand(&rng_state) * 57.0, f32(work_id), f32(home_id));
             texel1 = vec4<f32>(f32(work_id), 0.0, -10.0, 0.0); // Travel, waiting for path
-            texel2 = vec4<f32>(home_seg, home_seg, 0.0, 0.0);
+            texel2 = vec4<f32>(home_seg, home_seg, home_t, target_t);
             
             // Re-load variables for simulation
             money = texel0.x;
@@ -344,9 +415,11 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             // Release building occupancy
             let current_b_coords = building_coords(current_building);
             var current_b_tex1 = textureLoad(buildings_tex, current_b_coords[1]);
+            let current_b_tex2 = textureLoad(buildings_tex, current_b_coords[2]);
             current_b_tex1.y = max(0.0, current_b_tex1.y - 1.0);
             textureStore(buildings_tex, current_b_coords[1], current_b_tex1);
             let start_seg = u32(current_b_tex1.w); // road_seg is tex1.w
+            let start_t = current_b_tex2.z;
 
             // Pick next activity
             var next_activity = ACT_HOME;
@@ -385,7 +458,9 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             let next_b_coords = building_coords(u32(next_dest));
             let next_b_tex1 = textureLoad(buildings_tex, next_b_coords[1]);
+            let next_b_tex2 = textureLoad(buildings_tex, next_b_coords[2]);
             let target_seg = u32(next_b_tex1.w);
+            let target_t = next_b_tex2.z;
 
             // Queue path request
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
@@ -410,9 +485,14 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             texel1.y = activity;
             texel1.z = activity_time;
             texel1.w = path_cursor;
+            texel2.x = f32(start_seg);
+            texel2.y = f32(start_seg);
+            texel2.z = start_t;
+            texel2.w = target_t;
             
             textureStore(people_tex, coords[0], texel0);
             textureStore(people_tex, coords[1], texel1);
+            textureStore(people_tex, coords[2], texel2);
         }
     }
 }

@@ -278,6 +278,17 @@ impl RoadData {
         tile_to_seg
     }
 
+    pub fn get_tile_t(&self, seg_id: u32, tile: (u32, u32)) -> f32 {
+        if let Some(seg) = self.segments.get(seg_id as usize) {
+            if let Some(pos) = seg.points.iter().position(|&p| p == tile) {
+                if seg.points.len() > 1 {
+                    return pos as f32 / (seg.points.len() - 1) as f32;
+                }
+            }
+        }
+        0.0
+    }
+
     pub fn refresh_row(&mut self, id: u32) {
         let seg = &self.segments[id as usize];
         

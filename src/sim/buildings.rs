@@ -30,7 +30,7 @@ pub struct BuildingRow {
     pub road_seg: f32,
     pub growth: f32,
     pub age_seconds: f32,
-    pub _pad0: f32,
+    pub road_t: f32,
     pub _pad1: f32,
 }
 
@@ -43,6 +43,7 @@ pub struct Building {
     pub capacity: u32,
     pub income: f32,
     pub road_seg: u32,
+    pub road_t: f32,
     /// Accumulator controlling upgrade / abandon cycles.
     pub growth: f32,
     /// Seconds since this building was constructed (grace period for abandon).
@@ -103,7 +104,7 @@ impl BuildingData {
             road_seg: b.road_seg as f32,
             growth: b.growth,
             age_seconds: b.age_seconds,
-            _pad0: 0.0,
+            road_t: b.road_t,
             _pad1: 0.0,
         };
     }
@@ -137,6 +138,7 @@ pub fn spawn_building(
     tile: (u32, u32),
     btype: ZoneType,
     road_seg: u32,
+    road_t: f32,
 ) -> Option<u32> {
     let level = 0;
     let id = data.push(Building {
@@ -147,6 +149,7 @@ pub fn spawn_building(
         capacity: capacity_for(btype, level),
         income: income_for(btype, level),
         road_seg,
+        road_t,
         growth: 0.0,
         age_seconds: 0.0,
     })?;

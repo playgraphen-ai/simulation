@@ -39,14 +39,15 @@ pub fn paint_tick_system(
                 let mut adjacent_road = None;
                 for (nx, ny) in grid.neighbours4(x, y) {
                     if let Some(Tile::Road(seg_id)) = grid.get(nx, ny) {
-                        adjacent_road = Some(seg_id);
+                        adjacent_road = Some((seg_id, (nx, ny)));
                         break;
                     }
                 }
 
-                if let Some(seg_id) = adjacent_road {
+                if let Some((seg_id, road_tile)) = adjacent_road {
                     grid.set(x, y, Tile::Zone(tag.as_zone()));
-                    spawn_building(&mut buildings, &mut grid, (x, y), tag.as_zone(), seg_id);
+                    let road_t = roads.get_tile_t(seg_id, road_tile);
+                    spawn_building(&mut buildings, &mut grid, (x, y), tag.as_zone(), seg_id, road_t);
                     grid.set_changed();
                 }
             }
@@ -72,7 +73,8 @@ pub fn paint_tick_system(
                     let neighbours: Vec<(u32, u32)> = grid.neighbours4(tx, ty).collect();
                     for (nx, ny) in neighbours {
                         if let Some(Tile::Zone(z)) = grid.get(nx, ny) {
-                            spawn_building(&mut buildings, &mut grid, (nx, ny), z, seg_id);
+                            let road_t = roads.get_tile_t(seg_id, (tx, ty));
+                            spawn_building(&mut buildings, &mut grid, (nx, ny), z, seg_id, road_t);
                         }
                     }
                 }

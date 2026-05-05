@@ -126,14 +126,15 @@ pub fn build_starter_scenario(
                         let mut nearest_road = None;
                         for (nx, ny) in grid.neighbours4(tx, ty) {
                             if let Some(Tile::Road(sid)) = grid.get(nx, ny) {
-                                nearest_road = Some(sid);
+                                nearest_road = Some((sid, (nx, ny)));
                                 break;
                             }
                         }
 
-                        if let Some(seg_id) = nearest_road {
+                        if let Some((seg_id, road_tile)) = nearest_road {
                             grid.set(tx, ty, Tile::Zone(zone));
-                            if let Some(bid) = spawn_building(&mut buildings, &mut grid, (tx, ty), zone, seg_id) {
+                            let road_t = roads.get_tile_t(seg_id, road_tile);
+                            if let Some(bid) = spawn_building(&mut buildings, &mut grid, (tx, ty), zone, seg_id, road_t) {
                                 if first_building_id.is_none() {
                                     first_building_id = Some(bid);
                                 }
