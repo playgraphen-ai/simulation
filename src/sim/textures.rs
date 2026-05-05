@@ -14,6 +14,7 @@ pub struct DataTextures {
     pub roads: Handle<Image>,
     pub buildings: Handle<Image>,
     pub elevations: Handle<Image>,
+    pub road_points: Handle<Image>,
 }
 
 pub fn create_data_textures(
@@ -27,6 +28,7 @@ pub fn create_data_textures(
         roads: images.add(new_f32_texture(roads.tex_width, roads.tex_height, TextureFormat::Rgba32Float)),
         buildings: images.add(new_f32_texture(buildings.tex_width, buildings.tex_height, TextureFormat::Rgba32Float)),
         elevations: images.add(new_f32_texture(128, 128, TextureFormat::R32Float)),
+        road_points: images.add(new_f32_texture(1024, 1024, TextureFormat::Rg32Float)),
     }
 }
 
@@ -34,6 +36,7 @@ fn new_f32_texture(w: u32, h: u32, format: TextureFormat) -> Image {
     let pixel_size = match format {
         TextureFormat::Rgba32Float => 16,
         TextureFormat::R32Float => 4,
+        TextureFormat::Rg32Float => 8,
         _ => 16,
     };
     let mut img = Image::new_fill(
@@ -71,6 +74,13 @@ pub fn upload_dirty_textures(
     if roads.dirty {
         if let Some(img) = images.get_mut(&dt.roads) {
             let bytes: &[u8] = cast_slice(&roads.rows);
+            fit_bytes(img, bytes);
+        }
+        if let Some(img) = images.get_mut(&dt.road_points) {
+            let pts_f32: Vec<f32> = roads.all_points.iter()
+                .flat_map(|&(x, y)| vec![x as f32, y as f32])
+                .collect();
+            let bytes: &[u8] = cast_slice(&pts_f32);
             fit_bytes(img, bytes);
         }
         roads.dirty = false;

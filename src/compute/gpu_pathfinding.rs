@@ -22,6 +22,7 @@ pub struct PathRequest {
     pub start: u32,
     pub target_seg: u32,
     pub person_id: u32,
+    pub _pad: u32,
 }
 
 #[derive(Resource, Clone, ExtractResource, Default)]
@@ -189,22 +190,26 @@ fn prepare_path_buffers(
     // IMPORTANT: Sync max_path_len to match shader's 256.
     params.max_path_len = 256;
 
-    // We can't access `roads: Res<RoadData>` here easily without moving it to RenderApp or syncing it.
-    // Wait, GpuSimParams has `roads_tex_w`, we can read from there or pass it.
-    // Actually, `params.roads_tex_w` and `params.segments_count` are currently never updated in the RenderApp!
-    // We must extract them or update them.
-
+    let people_capacity = 65536u64; // Max people
+    let paths_size = people_capacity * 256u64 * 4u64; // 256 max path len * 4 bytes per id
+    if buffers.paths.is_none() {
+        let initial_data = vec![0xFFu8; paths_size as usize];
+        buffers.paths = Some(render_device.create_buffer_with_data(&BufferInitDescriptor {
+            label: Some("path_results_buffer"),
+            contents: &initial_data,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::MAP_READ | BufferUsages::COPY_DST, 
+        }));
+    }
 
     if buffers.requests.is_none() {
         buffers.requests = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("path_requests_buffer"),
-            size: 16 + (max_reqs as u64 * 12),
+            size: 16 + (max_reqs as u64 * 16), // 16 bytes per PathRequest
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC | BufferUsages::MAP_READ | BufferUsages::INDIRECT,
             mapped_at_creation: false,
         }));
     }
 
-    // Mix CPU requests with GPU indirect buffer
     let cpu_req_count = requests.list.len().min(max_reqs as usize) as u32;
     if let Some(req_buf) = &buffers.requests {
         if params.reset_path_queue == 1 {
@@ -216,29 +221,14 @@ fn prepare_path_buffers(
         }
     }
 
-    // Max buffer size for prev array is limit to 512MB
     let max_prev_size = 536870912u64; // 512MB
-    let prev_size = (max_reqs as u64 * params.segments_count as u64 * 4).max(4).min(max_prev_size);
+    let prev_size = (max_reqs as u64 * 8192u64 * 4).max(4).min(max_prev_size);
     if buffers.prev.is_none() || buffers.prev.as_ref().unwrap().size() < prev_size {
         buffers.prev = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("path_prev_buffer"),
             size: prev_size, 
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
-        }));
-    }
-
-    let people_capacity = 65536u64; // Max people
-    let paths_size = people_capacity * 256u64 * 4u64; // 256 max path len * 4 bytes per id
-    if buffers.paths.is_none() || buffers.paths.as_ref().unwrap().size() < paths_size {
-        // Try to initialize it with clear_buffer if possible, or initialize with zero and rely on shader, but shader requires 0xFF.
-        // Let's create it mapped and fill it, or use command encoder.
-        // For simplicity, we will just allocate the 64MB vector.
-        let initial_data = vec![0xFFu8; paths_size as usize];
-        buffers.paths = Some(render_device.create_buffer_with_data(&BufferInitDescriptor {
-            label: Some("path_results_buffer"),
-            contents: &initial_data,
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::MAP_READ | BufferUsages::COPY_DST, 
         }));
     }
 

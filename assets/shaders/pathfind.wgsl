@@ -23,6 +23,7 @@ struct PathRequest {
     start: u32,
     target_seg: u32,
     person_id: u32,
+    pad: u32,
 };
 
 struct PathRequestQueue {
@@ -67,7 +68,7 @@ fn main(
     }
     workgroupBarrier();
     let req_id = shared_req_id;
-    let max_req = atomicLoad(&path_queue.count_x);
+    let max_req = min(atomicLoad(&path_queue.count_x), 16384u);
 
     // D3D12/FXC compiler complains if we return early inside a workgroup barrier loop
     // To solve this, we don't return early. We use a boolean flag to wrap all operations.
@@ -78,7 +79,8 @@ fn main(
     }
 
     let slice = params.segments_count;
-    let base_prev = req_id * slice;
+    let safe_req_id = min(req_id, 16383u);
+    let base_prev = safe_req_id * slice;
 
     // Initialize prev to -1 for this request's segments.
     var init_idx = lidx;
@@ -114,12 +116,11 @@ fn main(
             if is_valid_req {
                 let cur = frontier[i];
                 let coords = seg_coords(cur);
-                let t1 = textureLoad(roads_tex, coords[1]);
                 let t2 = textureLoad(roads_tex, coords[2]);
                 let t3 = textureLoad(roads_tex, coords[3]);
                 
-                let count_a = u32(t1.z);
-                let count_b = u32(t1.w);
+                let count_a = u32(t2.w);
+                let count_b = u32(t3.w);
                 let total_count = count_a + count_b;
 
                 for (var n: u32 = 0u; n < 6u; n = n + 1u) {
@@ -181,7 +182,8 @@ fn main(
 
     // Reconstruct path.
     if lidx == 0u && is_valid_req {
-        let base_path = req.person_id * params.max_path_len;
+        let safe_person_id = min(req.person_id, 65535u);
+        let base_path = safe_person_id * params.max_path_len;
 
         if atomicLoad(&found) == 1u {
             var cur = req.target_seg;

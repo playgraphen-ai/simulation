@@ -11,6 +11,7 @@ struct CarMaterialParams {
 @group(3) @binding(1) var roads_tex: texture_2d<f32>;
 @group(3) @binding(2) var elevations_tex: texture_2d<f32>;
 @group(3) @binding(3) var<uniform> params: CarMaterialParams;
+@group(3) @binding(4) var road_points_tex: texture_2d<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -68,9 +69,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         let rtex0 = textureLoad(roads_tex, rc0, 0);
         let rtex1 = textureLoad(roads_tex, rc1, 0);
         
-        let seg_a = vec2<f32>(rtex0.x, rtex0.y);
-        let seg_b = vec2<f32>(rtex0.z, rtex0.w);
-        let seg_len = max(0.01, rtex1.y); // length is now tex1.y (was tex1.w)
+        let seg_len = max(0.01, rtex1.w); // total length is tex1.w (was tex1.y)
+        let links_offset = u32(rtex1.y);
+        let links_count = u32(rtex1.z);
         
         var start_at_b = false;
         if prev_seg != current_seg && prev_seg != 0xFFFFFFFFu {
@@ -79,6 +80,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
             let ptex0 = textureLoad(roads_tex, pc0, 0);
             let pa = vec2<f32>(ptex0.x, ptex0.y);
             let pb = vec2<f32>(ptex0.z, ptex0.w);
+            let rtex0 = textureLoad(roads_tex, rc0, 0);
+            let seg_b = vec2<f32>(rtex0.z, rtex0.w);
             if pa.x == seg_b.x && pa.y == seg_b.y || pb.x == seg_b.x && pb.y == seg_b.y {
                 start_at_b = true;
             }
@@ -91,17 +94,41 @@ fn vertex(vertex: Vertex) -> VertexOutput {
             frac = 1.0 - frac;
         }
 
-        let x = mix(seg_a.x, seg_b.x, frac) + 0.5;
-        let z = mix(seg_a.y, seg_b.y, frac) + 0.5;
+        // Interpolation along multi-link segment
+        let safe_links_count = max(1u, links_count);
+        let target_link_f = frac * f32(safe_links_count - 1u);
+        let i = u32(floor(target_link_f));
+        let f = fract(target_link_f);
+        
+        let rw_pts = 1024u;
+        let idx0 = links_offset + i;
+        let c0 = vec2<i32>(i32(idx0 % rw_pts), i32(idx0 / rw_pts));
+        let idx1 = links_offset + min(i + 1u, links_count - 1u);
+        let c1 = vec2<i32>(i32(idx1 % rw_pts), i32(idx1 / rw_pts));
+        
+        let p0 = textureLoad(road_points_tex, c0, 0).xy;
+        let p1 = textureLoad(road_points_tex, c1, 0).xy;
 
-        let el_a = textureLoad(elevations_tex, vec2<i32>(i32(seg_a.x), i32(seg_a.y)), 0).x;
-        let el_b = textureLoad(elevations_tex, vec2<i32>(i32(seg_b.x), i32(seg_b.y)), 0).x;
-        let y = mix(el_a, el_b, frac) + 0.15;
+        let x = mix(p0.x, p1.x, f) + 0.5;
+        let z = mix(p0.y, p1.y, f) + 0.5;
+
+        let el_a = textureLoad(elevations_tex, vec2<i32>(i32(p0.x), i32(p0.y)), 0).x;
+        let el_b = textureLoad(elevations_tex, vec2<i32>(i32(p1.x), i32(p1.y)), 0).x;
+        let y = mix(el_a, el_b, f) + 0.15;
 
         world_pos = vec3<f32>(x, y, z);
 
-        var dir = vec3<f32>(seg_b.x - seg_a.x, el_b - el_a, seg_b.y - seg_a.y);
-        if start_at_b { dir = -dir; }
+        var dir = vec3<f32>(p1.x - p0.x, el_b - el_a, p1.y - p0.y);
+        if start_at_b && frac < 0.001 {
+            // Special case for start at B: direction is from last-1 to last
+            let idxl = links_offset + safe_links_count - 1u;
+            let idxp = links_offset + max(0u, safe_links_count - 2u);
+            let cl = vec2<i32>(i32(idxl % rw_pts), i32(idxl / rw_pts));
+            let cp = vec2<i32>(i32(idxp % rw_pts), i32(idxp / rw_pts));
+            let plast = textureLoad(road_points_tex, cl, 0).xy;
+            let pprev = textureLoad(road_points_tex, cp, 0).xy;
+            dir = vec3<f32>(plast.x - pprev.x, 0.0, plast.y - pprev.y);
+        }
         
         let len_sq = dot(dir, dir);
         if len_sq > 0.001 {

@@ -40,6 +40,8 @@ pub struct CarInstancedMaterial {
     pub elevations_tex: Handle<Image>,
     #[uniform(3)]
     pub params: CarMaterialParams,
+    #[texture(4, dimension = "2d")]
+    pub road_points: Handle<Image>,
 }
 
 #[derive(Clone, Default, ShaderType, Debug)]
@@ -130,6 +132,7 @@ fn setup_cars(
                 grid_w: grid.width,
                 pad: 0,
             },
+            road_points: dt.road_points.clone(),
         });
 
         commands.spawn((

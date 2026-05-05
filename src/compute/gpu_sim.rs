@@ -165,6 +165,7 @@ pub struct GpuSimTextures {
     pub people: Option<Handle<Image>>,
     pub roads: Option<Handle<Image>>,
     pub buildings: Option<Handle<Image>>,
+    pub road_points: Option<Handle<Image>>,
 }
 
 #[repr(C)]
@@ -426,6 +427,7 @@ fn prepare_gpu_sim_buffers(
     render_device: Res<RenderDevice>,
     render_queue: Res<bevy::render::renderer::RenderQueue>,
     params: Res<GpuSimParams>,
+    _textures: Res<GpuSimTextures>,
     mut buffer: ResMut<GpuSimUniformBuffer>,
     mut congestion: ResMut<GpuCongestionBuffer>,
     mut stats: ResMut<GpuStatsBuffer>,

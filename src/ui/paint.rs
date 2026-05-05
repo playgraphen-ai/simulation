@@ -53,29 +53,30 @@ pub fn paint_tick_system(
         }
         ActiveTool::Road => {
             if matches!(grid.get(x, y), Some(Tile::Empty) | Some(Tile::Zone(_))) {
-                // Create a road segment whose endpoints are this tile and its
-                // closest existing road neighbour (if any). Otherwise this is
-                // a 1-tile segment; it will auto-connect to adjacent roads
-                // added later.
-                let mut neighbour_tile = None;
+                // Create a road link between this tile and any adjacent road tile.
                 for (nx, ny) in grid.neighbours4(x, y) {
                     if let Some(Tile::Road(_)) = grid.get(nx, ny) {
-                        neighbour_tile = Some((nx, ny));
-                        break;
+                        roads.push_link((x, y), (nx, ny));
                     }
                 }
-                let other = neighbour_tile.unwrap_or((x, y));
-                if let Some(seg_id) = roads.push_segment((x, y), other) {
-                    grid.set(x, y, Tile::Road(seg_id));
+                // If no neighbours, still add as a self-link or just mark as road tile later.
+                roads.push_link((x, y), (x, y));
+                
+                let tile_to_seg = roads.rebuild_topology();
+                
+                // Update the grid with the new super-segment IDs
+                for ((tx, ty), seg_id) in tile_to_seg {
+                    grid.set(tx, ty, Tile::Road(seg_id));
+                    
                     // Materialize adjacent zoned tiles as buildings.
-                    let neighbours: Vec<(u32, u32)> = grid.neighbours4(x, y).collect();
+                    let neighbours: Vec<(u32, u32)> = grid.neighbours4(tx, ty).collect();
                     for (nx, ny) in neighbours {
                         if let Some(Tile::Zone(z)) = grid.get(nx, ny) {
                             spawn_building(&mut buildings, &mut grid, (nx, ny), z, seg_id);
                         }
                     }
-                    grid.set_changed();
                 }
+                grid.set_changed();
             }
         }
     }

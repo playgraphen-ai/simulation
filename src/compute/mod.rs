@@ -120,6 +120,7 @@ fn sync_gpu_textures_and_params(
         gpu_tex.people = Some(dt.people.clone());
         gpu_tex.roads = Some(dt.roads.clone());
         gpu_tex.buildings = Some(dt.buildings.clone());
+        gpu_tex.road_points = Some(dt.road_points.clone());
     }
     gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &mut gpu_params);
     

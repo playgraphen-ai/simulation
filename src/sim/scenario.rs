@@ -65,9 +65,10 @@ pub fn build_starter_scenario(
                 continue;
             }
             let here = (x, y);
-            let other = prev.unwrap_or(here);
-            if let Some(seg_id) = roads.push_segment(here, other) {
-                grid.set(here.0, here.1, Tile::Road(seg_id));
+            if let Some(other) = prev {
+                roads.push_link(here, other);
+            } else {
+                roads.push_link(here, here);
             }
             prev = Some(here);
         }
@@ -82,12 +83,18 @@ pub fn build_starter_scenario(
                 continue;
             }
             let here = (x, y);
-            let other = prev.unwrap_or(here);
-            if let Some(seg_id) = roads.push_segment(here, other) {
-                grid.set(here.0, here.1, Tile::Road(seg_id));
+            if let Some(other) = prev {
+                roads.push_link(here, other);
+            } else {
+                roads.push_link(here, here);
             }
             prev = Some(here);
         }
+    }
+
+    let tile_to_seg = roads.rebuild_topology();
+    for ((tx, ty), seg_id) in tile_to_seg {
+        grid.set(tx, ty, Tile::Road(seg_id));
     }
 
     // 2. Zone the blocks

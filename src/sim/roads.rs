@@ -17,122 +17,265 @@ use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
 pub const ROAD_CAPACITY: u32 = 8192;
+pub const MAX_LINKS_TOTAL: u32 = 32768; // Increased capacity for individual links
 pub const TEXELS_PER_SEGMENT: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
 pub struct RoadRow {
-    // Texel 0: Endpoints
+    // Texel 0: Endpoints of the super-segment
     pub ax: f32,
     pub ay: f32,
     pub bx: f32,
     pub by: f32,
     // Texel 1: Stats & Meta
     pub speed_mean: f32,
+    pub links_offset: f32,
+    pub links_count: f32,
     pub length: f32,
-    pub count_a: f32,
-    pub count_b: f32,
     // Texel 2: Connections A
     pub conn_a0: f32,
     pub conn_a1: f32,
     pub conn_a2: f32,
-    pub _pad_a: f32,
+    pub count_a: f32,
     // Texel 3: Connections B
     pub conn_b0: f32,
     pub conn_b1: f32,
     pub conn_b2: f32,
-    pub _pad_b: f32,
+    pub count_b: f32,
 }
 
+/// A single link between two adjacent tiles.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct RoadLink {
+    pub a: (u32, u32),
+    pub b: (u32, u32),
+}
+
+/// A super-segment consisting of multiple links between two junctions/ends.
 #[derive(Clone, Debug, Default)]
 pub struct RoadSegment {
     pub a: (u32, u32),
     pub b: (u32, u32),
+    /// The ordered list of tiles making up this segment, from A to B.
+    pub points: Vec<(u32, u32)>,
     /// Up to 3 neighbour segment ids at end A.
     pub conn_a: Vec<u32>,
     /// Up to 3 neighbour segment ids at end B.
     pub conn_b: Vec<u32>,
     pub speed_mean: f32,
     pub length: f32,
+    pub links_offset: u32,
 }
 
 #[derive(Resource)]
 pub struct RoadData {
+    /// The super-segments used for pathfinding.
     pub segments: Vec<RoadSegment>,
+    /// All points (tiles) of all segments, packed for the GPU.
+    pub all_points: Vec<(u32, u32)>,
     pub rows: Vec<RoadRow>,
     pub tex_width: u32,
     pub tex_height: u32,
     pub dirty: bool,
     /// Usage counter per segment (incremented whenever a person crosses it).
-    /// Used by the itinerary cache to detect hot segments.
     pub usage: Vec<u32>,
+    
+    /// Internal representation of all placed road links before grouping.
+    pub links: Vec<RoadLink>,
 }
 
 impl Default for RoadData {
     fn default() -> Self {
         let total_texels = ROAD_CAPACITY * TEXELS_PER_SEGMENT;
         let side = (total_texels as f32).sqrt().ceil() as u32;
-        // Align width to TEXELS_PER_SEGMENT to ensure rows don't split segments
         let width = ((side + TEXELS_PER_SEGMENT - 1) / TEXELS_PER_SEGMENT) * TEXELS_PER_SEGMENT;
         let height = (total_texels + width - 1) / width;
         Self {
             segments: Vec::new(),
+            all_points: Vec::new(),
             rows: vec![RoadRow::default(); ROAD_CAPACITY as usize],
             tex_width: width,
             tex_height: height,
             dirty: true,
             usage: Vec::new(),
+            links: Vec::new(),
         }
     }
 }
 
 impl RoadData {
-    /// Add a segment between two adjacent tiles. Returns the segment id.
-    /// Auto-wires neighbour connections up to 3 per end.
-    pub fn push_segment(&mut self, a: (u32, u32), b: (u32, u32)) -> Option<u32> {
-        if self.segments.len() as u32 >= ROAD_CAPACITY {
-            return None;
+    /// Add a raw link between two tiles. Does NOT update the GPU until rebuild_topology is called.
+    pub fn push_link(&mut self, a: (u32, u32), b: (u32, u32)) {
+        if a == b {
+            // Self-links are only to ensure isolated tiles exist in the system.
+            // If the tile is already connected to something, don't add the self-link.
+            // But we don't know that here easily.
+            // Let's just allow it, but we MUST filter them out if real links exist during rebuild.
         }
-        let length = {
-            let dx = a.0 as f32 - b.0 as f32;
-            let dy = a.1 as f32 - b.1 as f32;
-            (dx * dx + dy * dy).sqrt().max(1.0)
-        };
-        let id = self.segments.len() as u32;
-        // Auto-connect with any existing segment sharing an endpoint.
-        let mut conn_a = Vec::new();
-        let mut conn_b = Vec::new();
-        let mut modified_others = Vec::new();
-        for (other_id, other) in self.segments.iter_mut().enumerate() {
-            let oid = other_id as u32;
-            let mut modified = false;
-            if other.a == a || other.b == a {
-                if conn_a.len() < 3 { conn_a.push(oid); }
-                // Mirror: the other segment also gains us as neighbour.
-                if other.a == a && other.conn_a.len() < 3 { other.conn_a.push(id); modified = true; }
-                if other.b == a && other.conn_b.len() < 3 { other.conn_b.push(id); modified = true; }
-            }
-            if other.a == b || other.b == b {
-                if conn_b.len() < 3 { conn_b.push(oid); }
-                if other.a == b && other.conn_a.len() < 3 { other.conn_a.push(id); modified = true; }
-                if other.b == b && other.conn_b.len() < 3 { other.conn_b.push(id); modified = true; }
-            }
-            if modified {
-                modified_others.push(oid);
-            }
+        if self.links.contains(&RoadLink { a, b }) || self.links.contains(&RoadLink { a: b, b: a }) {
+            return;
         }
-        self.segments.push(RoadSegment {
-            a, b, conn_a, conn_b,
-            speed_mean: 1.0,
-            length,
-        });
-        self.usage.push(0);
+        self.links.push(RoadLink { a, b });
         self.dirty = true;
-        self.refresh_row(id);
-        for oid in modified_others {
-            self.refresh_row(oid);
+    }
+
+    /// Rebuilds the super-segment topology from the raw links.
+    /// Returns a map from link to segment_id for updating the grid.
+    pub fn rebuild_topology(&mut self) -> Vec<((u32, u32), u32)> {
+        use std::collections::{HashMap, HashSet};
+        
+        let mut adj: HashMap<(u32, u32), Vec<(u32, u32)>> = HashMap::new();
+        for link in &self.links {
+            adj.entry(link.a).or_default().push(link.b);
+            adj.entry(link.b).or_default().push(link.a);
         }
-        Some(id)
+
+        // A junction is any point with != 2 neighbours.
+        let junctions: HashSet<(u32, u32)> = adj.iter()
+            .filter(|(_, neighbors)| neighbors.len() != 2)
+            .map(|(&pos, _)| pos)
+            .collect();
+
+        let mut visited_links = HashSet::new();
+        let mut new_segments = Vec::new();
+        let mut tile_to_seg = Vec::new();
+
+        // Start from each junction and follow paths
+        for &start_junction in &junctions {
+            if let Some(neighbors) = adj.get(&start_junction) {
+                for &neighbor in neighbors {
+                    let link = if start_junction < neighbor { (start_junction, neighbor) } else { (neighbor, start_junction) };
+                    if visited_links.contains(&link) { continue; }
+                    
+                    // Follow the path
+                    let mut path = vec![start_junction, neighbor];
+                    visited_links.insert(link);
+                    
+                    let mut current = neighbor;
+                    let mut prev = start_junction;
+                    
+                    while !junctions.contains(&current) {
+                        let nexts = &adj[&current];
+                        let next = if nexts[0] == prev { nexts[1] } else { nexts[0] };
+                        let next_link = if current < next { (current, next) } else { (next, current) };
+                        
+                        path.push(next);
+                        visited_links.insert(next_link);
+                        prev = current;
+                        current = next;
+                    }
+                    
+                    let length = (path.len() as f32 - 1.0).max(1.0);
+                    let seg_id = new_segments.len() as u32;
+                    
+                    for &pos in &path {
+                        tile_to_seg.push((pos, seg_id));
+                    }
+
+                    new_segments.push(RoadSegment {
+                        a: start_junction,
+                        b: current,
+                        points: path,
+                        conn_a: Vec::new(),
+                        conn_b: Vec::new(),
+                        speed_mean: 1.0,
+                        length,
+                        links_offset: 0,
+                    });
+                }
+            }
+        }
+
+        // Handle isolated loops (no junctions)
+        for link_obj in &self.links {
+            let link = if link_obj.a < link_obj.b { (link_obj.a, link_obj.b) } else { (link_obj.b, link_obj.a) };
+            if visited_links.contains(&link) { continue; }
+
+            // This must be part of a loop. Pick an arbitrary start.
+            let mut path = vec![link_obj.a, link_obj.b];
+            visited_links.insert(link);
+            let mut current = link_obj.b;
+            let mut prev = link_obj.a;
+            
+            while current != link_obj.a {
+                let nexts = &adj[&current];
+                let next = if nexts[0] == prev { nexts[1] } else { nexts[0] };
+                let next_link = if current < next { (current, next) } else { (next, current) };
+                path.push(next);
+                visited_links.insert(next_link);
+                prev = current;
+                current = next;
+            }
+
+            let length = (path.len() as f32 - 1.0).max(1.0);
+            let seg_id = new_segments.len() as u32;
+            for &pos in &path {
+                tile_to_seg.push((pos, seg_id));
+            }
+            new_segments.push(RoadSegment {
+                a: link_obj.a,
+                b: link_obj.a,
+                points: path,
+                conn_a: Vec::new(),
+                conn_b: Vec::new(),
+                speed_mean: 1.0,
+                length,
+                links_offset: 0,
+            });
+        }
+
+        // Wire connections between super-segments
+        let mut pos_to_segs: HashMap<(u32, u32), Vec<u32>> = HashMap::new();
+        for (id, seg) in new_segments.iter().enumerate() {
+            pos_to_segs.entry(seg.a).or_default().push(id as u32);
+            pos_to_segs.entry(seg.b).or_default().push(id as u32);
+        }
+
+        for id in 0..new_segments.len() {
+            let seg_a = new_segments[id].a;
+            let seg_b = new_segments[id].b;
+            
+            let mut conn_a = Vec::new();
+            if let Some(others) = pos_to_segs.get(&seg_a) {
+                for &oid in others {
+                    if oid != id as u32 && conn_a.len() < 3 {
+                        conn_a.push(oid);
+                    }
+                }
+            }
+            
+            let mut conn_b = Vec::new();
+            if let Some(others) = pos_to_segs.get(&seg_b) {
+                for &oid in others {
+                    if oid != id as u32 && conn_b.len() < 3 {
+                        conn_b.push(oid);
+                    }
+                }
+            }
+            
+            new_segments[id].conn_a = conn_a;
+            new_segments[id].conn_b = conn_b;
+        }
+
+        // Flatten points for GPU
+        self.all_points.clear();
+        for seg in new_segments.iter_mut() {
+            seg.links_offset = self.all_points.len() as u32;
+            for &p in &seg.points {
+                self.all_points.push(p);
+            }
+        }
+
+        self.segments = new_segments;
+        self.usage.resize(self.segments.len(), 0);
+        self.rows.fill(RoadRow::default());
+        for i in 0..self.segments.len() {
+            self.refresh_row(i as u32);
+        }
+        self.dirty = true;
+        
+        tile_to_seg
     }
 
     pub fn refresh_row(&mut self, id: u32) {
@@ -145,19 +288,19 @@ impl RoadData {
             by: seg.b.1 as f32,
             
             speed_mean: seg.speed_mean,
+            links_offset: seg.links_offset as f32,
+            links_count: seg.points.len() as f32,
             length: seg.length,
-            count_a: seg.conn_a.len() as f32,
-            count_b: seg.conn_b.len() as f32,
 
             conn_a0: seg.conn_a.get(0).copied().unwrap_or(0) as f32,
             conn_a1: seg.conn_a.get(1).copied().unwrap_or(0) as f32,
             conn_a2: seg.conn_a.get(2).copied().unwrap_or(0) as f32,
-            _pad_a: 0.0,
+            count_a: seg.conn_a.len() as f32,
 
             conn_b0: seg.conn_b.get(0).copied().unwrap_or(0) as f32,
             conn_b1: seg.conn_b.get(1).copied().unwrap_or(0) as f32,
             conn_b2: seg.conn_b.get(2).copied().unwrap_or(0) as f32,
-            _pad_b: 0.0,
+            count_b: seg.conn_b.len() as f32,
         };
     }
 }

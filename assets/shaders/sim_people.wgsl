@@ -37,6 +37,7 @@ struct PathRequest {
     start: u32,
     target_seg: u32,
     person_id: u32,
+    pad: u32,
 };
 
 struct PathRequestQueue {
@@ -74,7 +75,6 @@ struct GpuStats {
 @group(0) @binding(5) var<storage, read_write> person_paths: array<u32>;
 @group(0) @binding(6) var<storage, read_write> congestion: array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> stats: GpuStats;
-
 
 fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
     let base = i32(pid * 3u);
@@ -154,7 +154,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 // Just received path, start on first segment!
                 let r_coords = road_coords(current_path_seg);
                 let r_tex1 = textureLoad(roads_tex, r_coords[1]);
-                activity_time = max(0.5, r_tex1.y); // length is tex1.y (was tex1.w)
+                activity_time = max(0.5, r_tex1.w); // length is tex1.w
                 current_seg = f32(current_path_seg);
                 prev_seg = current_seg; // No previous segment yet
             } else {
@@ -163,7 +163,8 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let speed = max(0.05, r_tex1.x); // speed_mean is tex1.x
                 
                 // Write to congestion buffer: Simple increment instead of bitmask
-                atomicAdd(&congestion[current_path_seg], 1u);
+                let safe_seg = min(current_path_seg, 65535u);
+                atomicAdd(&congestion[safe_seg], 1u);
 
                 activity_time = activity_time - speed * params.dt;
 
@@ -177,7 +178,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                         if next_path_seg != 0xFFFFFFFFu {
                             let nr_coords = road_coords(next_path_seg);
                             let nr_tex1 = textureLoad(roads_tex, nr_coords[1]);
-                            activity_time = max(0.5, nr_tex1.y) + overshoot; // Carry over distance
+                            activity_time = max(0.5, nr_tex1.w) + overshoot; // Carry over distance
                             prev_seg = current_seg;
                             current_seg = f32(next_path_seg);
                         } else {
@@ -305,7 +306,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
             let max_queue = 16384u;
             if req_idx < max_queue {
-                path_queue.requests[req_idx] = PathRequest(u32(home_seg), target_seg, pid);
+                path_queue.requests[req_idx] = PathRequest(u32(home_seg), target_seg, pid, 0u);
             }
             person_paths[pid * 256u] = 0xFFFFFFFFu;
             
@@ -390,7 +391,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
             let max_queue = 16384u;
             if req_idx < max_queue {
-                path_queue.requests[req_idx] = PathRequest(start_seg, target_seg, pid);
+                path_queue.requests[req_idx] = PathRequest(start_seg, target_seg, pid, 0u);
             }
 
             // Reset path buffer for this person
