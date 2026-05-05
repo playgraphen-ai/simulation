@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::sim::counters::SimCounters;
 use crate::sim::people::PeopleData;
 use crate::sim::buildings::BuildingData;
+use crate::DetailedTimings;
 use std::panic;
 use std::sync::Once;
 
@@ -20,6 +21,20 @@ struct TelemetryLog {
     buildings_total: u32,
     buildings_abandoned: u32,
     destroyed_buildings: u32,
+    
+    // Performance details (averages over the interval)
+    avg_update_ms: f32,
+    avg_compute_ms: f32,
+    avg_render_ms: f32,
+    total_frame_ms: f32,
+}
+
+pub struct LogPlugin;
+
+impl Plugin for LogPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, json_logger_system);
+    }
 }
 
 pub fn json_logger_system(
@@ -28,6 +43,7 @@ pub fn json_logger_system(
     counters: Res<SimCounters>,
     people: Res<PeopleData>,
     buildings: Res<BuildingData>,
+    mut timings: ResMut<DetailedTimings>,
     mut acc: Local<f32>,
     mut init: Local<bool>,
 ) {
@@ -67,8 +83,9 @@ pub fn json_logger_system(
     }
 
     *acc += time.delta_secs();
-    if *acc >= 1.0 {
-        *acc -= 1.0;
+    if *acc >= 10.0 {
+        let interval_acc = *acc;
+        *acc = 0.0;
         
         let fps = diagnostics
             .get(&FrameTimeDiagnosticsPlugin::FPS)
@@ -89,6 +106,7 @@ pub fn json_logger_system(
             }
         }
 
+        let frame_count = timings.acc_frames.max(1) as f32;
         let log = TelemetryLog {
             timestamp: time.elapsed_secs_f64(),
             fps,
@@ -97,7 +115,18 @@ pub fn json_logger_system(
             buildings_total: buildings.items.len() as u32,
             buildings_abandoned: abandoned,
             destroyed_buildings: counters.destroyed_buildings,
+            
+            avg_update_ms: timings.acc_update_ms / frame_count,
+            avg_compute_ms: timings.acc_compute_ms / frame_count,
+            avg_render_ms: timings.acc_render_ms / frame_count,
+            total_frame_ms: (interval_acc * 1000.0) / frame_count,
         };
+
+        // Reset accumulators for the next interval
+        timings.acc_update_ms = 0.0;
+        timings.acc_compute_ms = 0.0;
+        timings.acc_render_ms = 0.0;
+        timings.acc_frames = 0;
 
         if let Ok(json) = serde_json::to_string(&log) {
             if let Ok(mut file) = OpenOptions::new().append(true).open("log.json") {

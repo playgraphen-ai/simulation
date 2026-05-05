@@ -512,6 +512,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
+        let start = std::time::Instant::now();
         let pipeline_cache = world.resource::<PipelineCache>();
         let gpu_pipeline = world.resource::<GpuSimPipeline>();
         let bind_group = &world.resource::<GpuSimBindGroup>().0;
@@ -639,6 +640,10 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 }
                 _ => {}
             }
+        }
+
+        if let Ok(tx) = world.resource::<crate::TimingsSender>().0.lock() {
+            let _ = tx.send((start.elapsed().as_secs_f32() * 1000.0, 0.0));
         }
 
         Ok(())

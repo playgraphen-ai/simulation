@@ -279,6 +279,7 @@ impl bevy::render::render_graph::Node for GpuPathfindingNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
+        let start = std::time::Instant::now();
         let params = world.resource::<PathParams>();
         if params.do_dispatch == 0 {
             return Ok(());
@@ -298,6 +299,11 @@ impl bevy::render::render_graph::Node for GpuPathfindingNode {
             // Let the GPU decide the number of workgroups based on the indirect buffer count_x
             pass.dispatch_workgroups_indirect(buffers.requests.as_ref().unwrap(), 0);
         }
+
+        if let Ok(tx) = world.resource::<crate::TimingsSender>().0.lock() {
+            let _ = tx.send((start.elapsed().as_secs_f32() * 1000.0, 0.0));
+        }
+
         Ok(())
     }
 }
