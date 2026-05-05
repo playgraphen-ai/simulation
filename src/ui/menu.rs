@@ -10,7 +10,7 @@ pub struct MenuSettings {
 
 impl Default for MenuSettings {
     fn default() -> Self {
-        Self { grid_x: 10, grid_y: 8, population: 10000 }
+        Self { grid_x: 20, grid_y: 16, population: 1000 }
     }
 }
 
@@ -47,7 +47,7 @@ pub fn setup_menu(mut commands: Commands) {
 
         spawn_btn(p, "Small City (3x3 blocks, 50 pop)", MenuAction::Small);
         spawn_btn(p, "Medium City (6x5 blocks, 300 pop)", MenuAction::Medium);
-        spawn_btn(p, "Large City (10x8 blocks, 1000 pop)", MenuAction::Large);
+        spawn_btn(p, "Large City (20x16 blocks, 1000 pop)", MenuAction::Large);
     });
 }
 
@@ -85,7 +85,7 @@ pub fn handle_menu_actions(
                 match action {
                     MenuAction::Small => { settings.grid_x = 3; settings.grid_y = 3; settings.population = 50; }
                     MenuAction::Medium => { settings.grid_x = 6; settings.grid_y = 5; settings.population = 300; }
-                    MenuAction::Large => { settings.grid_x = 10; settings.grid_y = 8; settings.population = 1000; }
+                    MenuAction::Large => { settings.grid_x = 20; settings.grid_y = 16; settings.population = 1000; }
                 }
                 if let Ok(e) = root.single() {
                     commands.entity(e).despawn();

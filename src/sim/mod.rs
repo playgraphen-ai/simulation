@@ -43,8 +43,8 @@ impl Plugin for SimPlugin {
 use noise::{NoiseFn, OpenSimplex};
 
 pub fn startup(mut grid: ResMut<grid::CityGrid>) {
-    let w = 128;
-    let h = 128;
+    let w = 1280;
+    let h = 1280;
     grid.reset(w, h);
     
     let elev_noise = OpenSimplex::new(42);

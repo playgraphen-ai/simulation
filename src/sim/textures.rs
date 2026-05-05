@@ -22,12 +22,14 @@ pub fn create_data_textures(
     people: &PeopleData,
     roads: &RoadData,
     buildings: &BuildingData,
+    grid_w: u32,
+    grid_h: u32,
 ) -> DataTextures {
     DataTextures {
         people: images.add(new_f32_texture(people.tex_width, people.tex_height, TextureFormat::Rgba32Float)),
         roads: images.add(new_f32_texture(roads.tex_width, roads.tex_height, TextureFormat::Rgba32Float)),
         buildings: images.add(new_f32_texture(buildings.tex_width, buildings.tex_height, TextureFormat::Rgba32Float)),
-        elevations: images.add(new_f32_texture(128, 128, TextureFormat::R32Float)),
+        elevations: images.add(new_f32_texture(grid_w, grid_h, TextureFormat::R32Float)),
         road_points: images.add(new_f32_texture(1024, 1024, TextureFormat::Rg32Float)),
     }
 }

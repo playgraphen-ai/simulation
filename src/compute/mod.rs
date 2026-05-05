@@ -97,8 +97,9 @@ fn setup_data_textures(
     people: Res<PeopleData>,
     roads: Res<RoadData>,
     buildings: Res<BuildingData>,
+    grid: Res<crate::sim::grid::CityGrid>,
 ) {
-    let dt = create_data_textures(&mut images, &people, &roads, &buildings);
+    let dt = create_data_textures(&mut images, &people, &roads, &buildings, grid.width, grid.height);
     commands.insert_resource(dt);
 }
 
@@ -131,9 +132,10 @@ fn sync_gpu_textures_and_params(
         path_params.reset_path_queue = 1;
         // Also flush pending spawns on the first frame of the cycle
         if pending.count > 0 {
-            gpu_params.spawn_count = pending.count;
+            let spawn_this_cycle = pending.count.min(1000);
+            gpu_params.spawn_count = spawn_this_cycle;
             gpu_params.spawn_start_index = people.len.saturating_sub(pending.count);
-            pending.count = 0;
+            pending.count -= spawn_this_cycle;
         } else {
             gpu_params.spawn_count = 0;
             gpu_params.spawn_start_index = 0;

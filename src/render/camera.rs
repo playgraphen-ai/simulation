@@ -24,7 +24,7 @@ pub struct MainCamera {
 
 impl Default for MainCamera {
     fn default() -> Self {
-        Self { focus: Vec3::new(64., 0., 64.), distance: 80.0, yaw: 0.6, pitch: -0.9 }
+        Self { focus: Vec3::new(640., 0., 640.), distance: 200.0, yaw: 0.6, pitch: -0.9 }
     }
 }
 
@@ -90,7 +90,7 @@ fn camera_control(
     }
     // Scroll to zoom.
     for ev in ev_wheel.read() {
-        cam.distance = (cam.distance - ev.y * 3.0).clamp(15.0, 300.0);
+        cam.distance = (cam.distance - ev.y * 3.0).clamp(15.0, 2000.0);
     }
     // WASD to pan along the ground plane, aligned with camera yaw.
     let mut mv = Vec3::ZERO;
