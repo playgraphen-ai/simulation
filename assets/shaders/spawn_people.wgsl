@@ -24,6 +24,8 @@ struct SimParams {
     segments_count: u32,
     spawn_count: u32,
     spawn_start_index: u32,
+    grid_w: u32,
+    grid_h: u32,
 };
 
 struct PathRequest {
@@ -47,7 +49,9 @@ struct PathRequestQueue {
 @group(0) @binding(3) var<uniform> params: SimParams;
 @group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
 @group(0) @binding(5) var<storage, read_write> person_paths: array<u32>;
-// Binding 6: Congestion buffer (unused here)
+// Binding 6: Congestion buffer
+// Binding 7: Stats buffer
+@group(0) @binding(8) var<storage, read_write> occupancy: array<atomic<u32>>;
 
 fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
     let base = i32(pid * 3u);
@@ -110,17 +114,36 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         if btype == 0.0 && occupants < capacity {
             let home_seg = u32(tex1.w);
             let r_coords = road_coords(home_seg);
+            let r_tex0 = textureLoad(roads_tex, r_coords[0]);
             let r_tex1 = textureLoad(roads_tex, r_coords[1]);
             if r_tex1.x > 0.15 {
-                home_id = bid;
-                found_home = true;
+                // Check occupancy to ensure the spawn point isn't blocked
+                let h_tex2 = textureLoad(buildings_tex, coords[2]);
+                let home_t = h_tex2.z;
+                let ax = r_tex0.x; let ay = r_tex0.y;
+                let bx = r_tex0.z; let by = r_tex0.w;
+                let tx = u32(mix(ax, bx, home_t));
+                let ty = u32(mix(ay, by, home_t));
+                let grid_idx = tx + ty * params.grid_w;
                 
-                // Increment occupants (probabilistic, non-atomic for now to avoid complexity, 
-                // but retries help. For thousands of spawns, some overlap is okay 
-                // as buildings will auto-correct next frame)
-                tex1.y = tex1.y + 1.0;
-                textureStore(buildings_tex, coords[1], tex1);
-                break;
+                var is_blocked = false;
+                if grid_idx < params.grid_w * params.grid_h {
+                    if atomicLoad(&occupancy[grid_idx]) > 0u {
+                        is_blocked = true;
+                    }
+                }
+
+                if !is_blocked {
+                    home_id = bid;
+                    found_home = true;
+                    
+                    // Increment occupants (probabilistic, non-atomic for now to avoid complexity, 
+                    // but retries help. For thousands of spawns, some overlap is okay 
+                    // as buildings will auto-correct next frame)
+                    tex1.y = tex1.y + 1.0;
+                    textureStore(buildings_tex, coords[1], tex1);
+                    break;
+                }
             }
         }
     }
