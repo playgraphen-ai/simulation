@@ -99,19 +99,12 @@ pub fn json_logger_system(
             }
         }
         
-        let mut cars_on_road = 0;
-        for i in 0..people.len as usize {
-            if people.rows[i].activity_code == 0.0 {
-                cars_on_road += 1;
-            }
-        }
-
         let frame_count = timings.acc_frames.max(1) as f32;
         let log = TelemetryLog {
             timestamp: time.elapsed_secs_f64(),
             fps,
             population: people.len,
-            cars_on_road,
+            cars_on_road: counters.cars,
             buildings_total: buildings.items.len() as u32,
             buildings_abandoned: abandoned,
             destroyed_buildings: counters.destroyed_buildings,

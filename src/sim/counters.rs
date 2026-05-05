@@ -7,6 +7,7 @@ use super::roads::RoadData;
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct SimCounters {
     pub people: u32,
+    pub cars: u32,
     pub residential: u32,
     pub offices: u32,
     pub shops: u32,
