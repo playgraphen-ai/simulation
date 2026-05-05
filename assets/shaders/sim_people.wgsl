@@ -166,6 +166,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 activity_time = activity_time - speed * params.dt;
 
                 if activity_time <= 0.0 {
+                    let overshoot = activity_time; // Negative value representing distance traveled past the node
                     path_cursor = path_cursor + 1.0;
                     let next_step = u32(path_cursor);
                     
@@ -174,7 +175,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                         if next_path_seg != 0xFFFFFFFFu {
                             let nr_coords = road_coords(next_path_seg);
                             let nr_tex1 = textureLoad(roads_tex, nr_coords[1]);
-                            activity_time = max(0.5, nr_tex1.w); // length is tex1.w
+                            activity_time = max(0.5, nr_tex1.w) + overshoot; // Carry over distance
                             prev_seg = current_seg;
                             current_seg = f32(next_path_seg);
                         } else {

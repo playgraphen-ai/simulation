@@ -178,16 +178,12 @@ fn main(
     // Reconstruct path.
     if lidx == 0u && is_valid_req {
         let base_path = req.person_id * params.max_path_len;
-        // Initialize path to sentinel (u32::MAX).
-        for (var pidx: u32 = 0u; pidx < params.max_path_len; pidx = pidx + 1u) {
-            paths[base_path + pidx] = 0xFFFFFFFFu;
-        }
 
         if atomicLoad(&found) == 1u {
             var cur = req.target_seg;
             var path_tmp: array<u32, 256>; // Local temporary storage for reversal
             var count: u32 = 0u;
-            
+
             while count < params.max_path_len {
                 path_tmp[count] = cur;
                 count = count + 1u;
@@ -195,11 +191,19 @@ fn main(
                 if p < 0 || u32(p) == cur { break; }
                 cur = u32(p);
             }
-            
+
             // Store path in forward order.
             for (var k: u32 = 0u; k < count; k = k + 1u) {
                 paths[base_path + k] = path_tmp[count - 1u - k];
             }
+
+            // Pad the rest of the path buffer with the sentinel value
+            for (var k: u32 = count; k < params.max_path_len; k = k + 1u) {
+                paths[base_path + k] = 0xFFFFFFFFu;
+            }
+        } else {
+             // Path not found, set the first element to sentinel so the car fails gracefully.
+             paths[base_path] = 0xFFFFFFFFu;
         }
     }
-}
+    }
