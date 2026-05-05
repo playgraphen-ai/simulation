@@ -333,6 +333,11 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let b_tex0 = textureLoad(buildings_tex, b_coords[0]);
             var b_tex1 = textureLoad(buildings_tex, b_coords[1]);
             if b_tex0.z == 0.0 && b_tex1.y < b_tex1.z { // Residential and has space
+                let home_seg = u32(b_tex1.w);
+                let r_coords = road_coords(home_seg);
+                let r_tex1 = textureLoad(roads_tex, r_coords[1]);
+                if r_tex1.x <= 0.15 { continue; } // Road is full, try another or wait
+
                 home_id = bid;
                 found_home = true;
                 b_tex1.y = b_tex1.y + 1.0;
@@ -461,6 +466,17 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let next_b_tex2 = textureLoad(buildings_tex, next_b_coords[2]);
             let target_seg = u32(next_b_tex1.w);
             let target_t = next_b_tex2.z;
+
+            // Check if start segment is full
+            let start_r_coords = road_coords(start_seg);
+            let start_r_tex1 = textureLoad(roads_tex, start_r_coords[1]);
+            if start_r_tex1.x <= 0.15 {
+                // Wait for space
+                // Revert building occupancy
+                current_b_tex1.y = current_b_tex1.y + 1.0;
+                textureStore(buildings_tex, current_b_coords[1], current_b_tex1);
+                return;
+            }
 
             // Queue path request
             let req_idx = atomicAdd(&path_queue.count_x, 1u);

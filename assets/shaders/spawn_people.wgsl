@@ -67,6 +67,16 @@ fn building_coords(bid: u32) -> array<vec2<i32>, 3> {
     return array<vec2<i32>, 3>(c0, c1, c2);
 }
 
+fn road_coords(sid: u32) -> array<vec2<i32>, 4> {
+    let base = i32(sid * 4u);
+    let w = max(1, i32(params.roads_tex_w));
+    let c0 = vec2<i32>(base % w, base / w);
+    let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
+    let c2 = vec2<i32>((base + 2) % w, (base + 2) / w);
+    let c3 = vec2<i32>((base + 3) % w, (base + 3) / w);
+    return array<vec2<i32>, 4>(c0, c1, c2, c3);
+}
+
 fn rand(state: ptr<function, u32>) -> f32 {
     var x = *state;
     x ^= x << 13u;
@@ -98,15 +108,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let capacity = tex1.z;
         
         if btype == 0.0 && occupants < capacity {
-            home_id = bid;
-            found_home = true;
-            
-            // Increment occupants (probabilistic, non-atomic for now to avoid complexity, 
-            // but retries help. For thousands of spawns, some overlap is okay 
-            // as buildings will auto-correct next frame)
-            tex1.y = tex1.y + 1.0;
-            textureStore(buildings_tex, coords[1], tex1);
-            break;
+            let home_seg = u32(tex1.w);
+            let r_coords = road_coords(home_seg);
+            let r_tex1 = textureLoad(roads_tex, r_coords[1]);
+            if r_tex1.x > 0.15 {
+                home_id = bid;
+                found_home = true;
+                
+                // Increment occupants (probabilistic, non-atomic for now to avoid complexity, 
+                // but retries help. For thousands of spawns, some overlap is okay 
+                // as buildings will auto-correct next frame)
+                tex1.y = tex1.y + 1.0;
+                textureStore(buildings_tex, coords[1], tex1);
+                break;
+            }
         }
     }
     
