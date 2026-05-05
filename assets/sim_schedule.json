@@ -1,7 +1,7 @@
 {
-  "buildings_frames": 10,
-  "people_logic_frames": 10,
-  "roads_frames": 10,
+  "buildings_frames": 20,
+  "people_logic_frames": 20,
+  "roads_frames": 20,
   "pathfind_frames": 59,
   "stats_frames": 1
 }

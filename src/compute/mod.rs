@@ -174,17 +174,15 @@ fn sync_gpu_textures_and_params(
                 let slice = (roads.segments.len() as u32 + c.roads_frames - 1) / c.roads_frames;
                 gpu_params.r_start = f * slice;
                 gpu_params.r_count = slice.min(roads.segments.len() as u32 - gpu_params.r_start.min(roads.segments.len() as u32));
-            } else if frame == c.roads_frames {
-                path_params.do_dispatch = 1;
-                // Dispatch logic is handled in gpu_pathfinding.rs
             } else {
-                path_params.do_dispatch = 0;
+                frame -= c.roads_frames;
+                if frame < c.pathfind_frames {
+                    path_params.do_dispatch = 1;
+                } else {
+                    path_params.do_dispatch = 0;
+                }
             }
         }
-    }
-    
-    if schedule.current_frame < c.buildings_frames + c.people_logic_frames + c.roads_frames {
-        path_params.do_dispatch = 0;
     }
 
     if schedule.current_frame == 0 {
