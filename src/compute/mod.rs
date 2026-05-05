@@ -111,6 +111,7 @@ fn sync_gpu_textures_and_params(
     people: Res<PeopleData>,
     buildings: Res<BuildingData>,
     roads: Res<RoadData>,
+    grid: Res<crate::sim::grid::CityGrid>,
     mut pending: ResMut<spawn::PendingGpuSpawns>,
     mut gpu_params: ResMut<gpu_sim::GpuSimParams>,
     mut path_params: ResMut<gpu_pathfinding::PathParams>,
@@ -122,7 +123,7 @@ fn sync_gpu_textures_and_params(
         gpu_tex.buildings = Some(dt.buildings.clone());
         gpu_tex.road_points = Some(dt.road_points.clone());
     }
-    gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &mut gpu_params);
+    gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &grid, &mut gpu_params);
     
     let frame = schedule.current_frame;
 

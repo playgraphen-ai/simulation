@@ -48,6 +48,9 @@ pub struct GpuReadbackBuffer {
     pub s_mapped: Arc<AtomicBool>,
 }
 
+#[derive(Resource, Default)]
+struct GpuOccupancyBuffer(Option<Buffer>);
+
 fn prepare_readback_buffers(
     render_device: Res<RenderDevice>,
     mut readback: ResMut<GpuReadbackBuffer>,
@@ -142,6 +145,7 @@ impl Plugin for GpuSimPlugin {
             .init_resource::<GpuSimUniformBuffer>()
             .init_resource::<GpuCongestionBuffer>()
             .init_resource::<GpuStatsBuffer>()
+            .init_resource::<GpuOccupancyBuffer>()
             .add_systems(Render, (
                 prepare_gpu_sim_buffers,
                 prepare_readback_buffers,
@@ -200,9 +204,9 @@ pub struct GpuSimParams {
     pub cycle_frames: u32,
     pub do_stats_readback: u32,
     pub reset_stats: u32,
+    pub grid_w: u32,
+    pub grid_h: u32,
     pub _pad0: u32,
-    pub _pad1: u32,
-    pub _pad2: u32,
 }
 
 impl Default for GpuSimParams {
@@ -237,9 +241,9 @@ impl Default for GpuSimParams {
             cycle_frames: 90,
             do_stats_readback: 0,
             reset_stats: 0,
+            grid_w: 128,
+            grid_h: 128,
             _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
         }
     }
 }
@@ -247,6 +251,7 @@ impl Default for GpuSimParams {
 #[derive(Resource)]
 struct GpuSimPipeline {
     pub people_pipeline: CachedComputePipelineId,
+    pub occupancy_pipeline: CachedComputePipelineId,
     pub logic_pipeline: CachedComputePipelineId,
     pub buildings_pipeline: CachedComputePipelineId,
     pub update_roads_pipeline: CachedComputePipelineId,
@@ -339,6 +344,16 @@ impl FromWorld for GpuSimPipeline {
                 },
                 count: None,
             },
+            BindGroupLayoutEntry {
+                binding: 8,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ];
 
         let layout = render_device.create_bind_group_layout(Some("gpu_sim_layout"), &entries);
@@ -360,6 +375,16 @@ impl FromWorld for GpuSimPipeline {
             zero_initialize_workgroup_memory: false,
         });
         
+        let occupancy_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::Borrowed("gpu_sim_occupancy_pipeline")),
+            layout: vec![layout_desc.clone()], 
+            push_constant_ranges: vec![],
+            shader: shader.clone(),
+            shader_defs: vec![],
+            entry_point: Some(Cow::Borrowed("main_people_occupancy")),
+            zero_initialize_workgroup_memory: false,
+        });
+
         let logic_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some(Cow::Borrowed("gpu_sim_people_logic_pipeline")),
             layout: vec![layout_desc.clone()], 
@@ -404,6 +429,7 @@ impl FromWorld for GpuSimPipeline {
 
         Self {
             people_pipeline,
+            occupancy_pipeline,
             buildings_pipeline,
             update_roads_pipeline,
             logic_pipeline,
@@ -431,6 +457,7 @@ fn prepare_gpu_sim_buffers(
     mut buffer: ResMut<GpuSimUniformBuffer>,
     mut congestion: ResMut<GpuCongestionBuffer>,
     mut stats: ResMut<GpuStatsBuffer>,
+    mut occupancy: ResMut<GpuOccupancyBuffer>,
 ) {
     let bytes = bytemuck::bytes_of(&*params);
     if let Some(buf) = &buffer.0 {
@@ -463,6 +490,16 @@ fn prepare_gpu_sim_buffers(
             mapped_at_creation: false,
         }));
     }
+
+    let grid_size = (params.grid_w * params.grid_h) as u64;
+    if occupancy.0.is_none() || occupancy.0.as_ref().unwrap().size() < (grid_size * 4) {
+        occupancy.0 = Some(render_device.create_buffer(&BufferDescriptor {
+            label: Some("gpu_occupancy_buffer"),
+            size: grid_size.max(65536) * 4,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        }));
+    }
 }
 
 fn queue_gpu_sim_bind_group(
@@ -473,10 +510,11 @@ fn queue_gpu_sim_bind_group(
     buffer: Res<GpuSimUniformBuffer>,
     congestion: Res<GpuCongestionBuffer>,
     stats: Res<GpuStatsBuffer>,
+    occupancy: Res<GpuOccupancyBuffer>,
     path_buffers: Res<crate::compute::gpu_pathfinding::GpuPathBuffers>,
     mut bind_group: ResMut<GpuSimBindGroup>,
 ) {
-    let (Some(people), Some(roads), Some(buildings), Some(params_buf), Some(path_req_buf), Some(paths_buf), Some(congestion_buf), Some(stats_buf)) = (
+    let (Some(people), Some(roads), Some(buildings), Some(params_buf), Some(path_req_buf), Some(paths_buf), Some(congestion_buf), Some(stats_buf), Some(occupancy_buf)) = (
         textures.people.as_ref().and_then(|h| gpu_images.get(h)),
         textures.roads.as_ref().and_then(|h| gpu_images.get(h)),
         textures.buildings.as_ref().and_then(|h| gpu_images.get(h)),
@@ -485,6 +523,7 @@ fn queue_gpu_sim_bind_group(
         path_buffers.paths.as_ref(),
         congestion.0.as_ref(),
         stats.0.as_ref(),
+        occupancy.0.as_ref(),
     ) else { return; };
 
     let bg = render_device.create_bind_group(
@@ -499,6 +538,7 @@ fn queue_gpu_sim_bind_group(
             paths_buf.as_entire_binding(),
             congestion_buf.as_entire_binding(),
             stats_buf.as_entire_binding(),
+            occupancy_buf.as_entire_binding(),
         )),
     );
     bind_group.0 = Some(bg);
@@ -523,8 +563,9 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
         let readback = world.resource::<GpuReadbackBuffer>();
 
-        if let (Some(movement_pipe), Some(logic_pipe), Some(build_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(bg)) = (
+        if let (Some(movement_pipe), Some(occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(bg)) = (
             pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.buildings_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.update_roads_pipeline),
@@ -536,6 +577,11 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
                     render_context.command_encoder().clear_buffer(stats_buf, 0, None);
                 }
+            }
+
+            // Clear occupancy buffer every frame
+            if let Some(occ_buf) = world.resource::<GpuOccupancyBuffer>().0.as_ref() {
+                render_context.command_encoder().clear_buffer(occ_buf, 0, None);
             }
 
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
@@ -558,21 +604,37 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(b_wg_count, 1, 1);
             }
 
-            // 2. People movement pass (every frame)
-            pass.set_pipeline(movement_pipe);
+            // 2. Mark Occupancy pass (to be read by movement pass)
+            pass.set_pipeline(occupancy_pipe);
             let p_wg_count = (params.people_count + 63) / 64;
             if p_wg_count > 0 {
                 pass.dispatch_workgroups(p_wg_count, 1, 1);
             }
+
+            // End occupancy pass to ensure it's written before movement pass starts
+            // (Strictly speaking, we need a barrier or separate pass)
+            drop(pass);
+
+            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                label: Some("gpu_sim_movement_pass"),
+                ..default()
+            });
+            pass.set_bind_group(0, bg, &[]);
+
+            // 3. People movement pass (every frame)
+            pass.set_pipeline(movement_pipe);
+            if p_wg_count > 0 {
+                pass.dispatch_workgroups(p_wg_count, 1, 1);
+            }
             
-            // 3. People logic pass
+            // 4. People logic pass
             if params.logic_count > 0 {
                 pass.set_pipeline(logic_pipe);
                 let logic_wg_count = (params.logic_count + 63) / 64;
                 pass.dispatch_workgroups(logic_wg_count, 1, 1);
             }
 
-            // 4. Update Roads pass
+            // 5. Update Roads pass
             if params.r_count > 0 {
                 pass.set_pipeline(update_roads_pipe);
                 let r_wg_count = (params.r_count + 63) / 64;
@@ -803,6 +865,7 @@ pub fn update_gpu_sim_params(
     people: &PeopleData,
     buildings: &BuildingData,
     roads: &crate::sim::roads::RoadData,
+    grid: &crate::sim::grid::CityGrid,
     gpu_params: &mut GpuSimParams,
 ) {
     gpu_params.dt = time.delta_secs();
@@ -823,4 +886,6 @@ pub fn update_gpu_sim_params(
     gpu_params.roads_tex_w = roads.tex_width;
     gpu_params.buildings_count = buildings.items.len() as u32;
     gpu_params.segments_count = roads.segments.len() as u32;
+    gpu_params.grid_w = grid.width;
+    gpu_params.grid_h = grid.height;
 }
