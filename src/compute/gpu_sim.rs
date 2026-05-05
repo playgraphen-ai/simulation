@@ -795,7 +795,6 @@ pub fn update_gpu_sim_params(
     people: &PeopleData,
     buildings: &BuildingData,
     roads: &crate::sim::roads::RoadData,
-    pending: ResMut<crate::compute::spawn::PendingGpuSpawns>,
     gpu_params: &mut GpuSimParams,
 ) {
     gpu_params.dt = time.delta_secs();
@@ -816,27 +815,4 @@ pub fn update_gpu_sim_params(
     gpu_params.roads_tex_w = roads.tex_width;
     gpu_params.buildings_count = buildings.items.len() as u32;
     gpu_params.segments_count = roads.segments.len() as u32;
-
-    if pending.count > 0 {
-        gpu_params.spawn_count = pending.count;
-        gpu_params.spawn_start_index = people.len.saturating_sub(pending.count);
-        // On garde pending.count pour l'extraction, et on l'efface
-        // via un système différé pour s'assurer que le RenderApp l'a copié.
-    } else {
-        gpu_params.spawn_count = 0;
-        gpu_params.spawn_start_index = 0;
-    }
-}
-
-pub fn clear_pending_spawns(mut pending: ResMut<crate::compute::spawn::PendingGpuSpawns>, mut frame_count: Local<u32>) {
-    // Wait for at least 1 frame so RenderApp is guaranteed to extract it.
-    if pending.count > 0 {
-        *frame_count += 1;
-        if *frame_count > 1 {
-            pending.count = 0;
-            *frame_count = 0;
-        }
-    } else {
-        *frame_count = 0;
-    }
 }

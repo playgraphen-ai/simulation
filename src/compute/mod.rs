@@ -80,7 +80,6 @@ impl Plugin for ComputePlugin {
                 spawn::handle_spawn_requests,
                 update_schedule_state,
                 sync_gpu_textures_and_params,
-                gpu_sim::clear_pending_spawns,
                 gpu_sim::apply_gpu_readback,
                 cpu_sim::cpu_sim_tick,
                 upload_dirty_textures_system,
@@ -112,7 +111,7 @@ fn sync_gpu_textures_and_params(
     people: Res<PeopleData>,
     buildings: Res<BuildingData>,
     roads: Res<RoadData>,
-    pending: ResMut<spawn::PendingGpuSpawns>,
+    mut pending: ResMut<spawn::PendingGpuSpawns>,
     mut gpu_params: ResMut<gpu_sim::GpuSimParams>,
     mut path_params: ResMut<gpu_pathfinding::PathParams>,
     schedule: Res<SimScheduleState>,
@@ -122,8 +121,27 @@ fn sync_gpu_textures_and_params(
         gpu_tex.roads = Some(dt.roads.clone());
         gpu_tex.buildings = Some(dt.buildings.clone());
     }
-    gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, pending, &mut gpu_params);
+    gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &mut gpu_params);
     
+    let frame = schedule.current_frame;
+
+    if frame == 0 {
+        path_params.reset_path_queue = 1;
+        // Also flush pending spawns on the first frame of the cycle
+        if pending.count > 0 {
+            gpu_params.spawn_count = pending.count;
+            gpu_params.spawn_start_index = people.len.saturating_sub(pending.count);
+            pending.count = 0;
+        } else {
+            gpu_params.spawn_count = 0;
+            gpu_params.spawn_start_index = 0;
+        }
+    } else {
+        path_params.reset_path_queue = 0;
+        gpu_params.spawn_count = 0;
+        gpu_params.spawn_start_index = 0;
+    }
+
     // Slice logic
     gpu_params.cycle_frames = schedule.cycle_frames;
     gpu_params.b_count = 0;
@@ -175,12 +193,6 @@ fn sync_gpu_textures_and_params(
         gpu_params.do_stats_readback = 1;
     } else {
         gpu_params.do_stats_readback = 0;
-    }
-
-    if schedule.current_frame == c.buildings_frames {
-        path_params.reset_path_queue = 1;
-    } else {
-        path_params.reset_path_queue = 0;
     }
 
     path_params.roads_tex_w = roads.tex_width;
