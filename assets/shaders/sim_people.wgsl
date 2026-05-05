@@ -94,12 +94,14 @@ fn building_coords(bid: u32) -> array<vec2<i32>, 3> {
     return array<vec2<i32>, 3>(c0, c1, c2);
 }
 
-fn road_coords(sid: u32) -> array<vec2<i32>, 2> {
-    let base = i32(sid * 2u);
+fn road_coords(sid: u32) -> array<vec2<i32>, 4> {
+    let base = i32(sid * 4u);
     let w = max(1, i32(params.roads_tex_w));
     let c0 = vec2<i32>(base % w, base / w);
     let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
-    return array<vec2<i32>, 2>(c0, c1);
+    let c2 = vec2<i32>((base + 2) % w, (base + 2) / w);
+    let c3 = vec2<i32>((base + 3) % w, (base + 3) / w);
+    return array<vec2<i32>, 4>(c0, c1, c2, c3);
 }
 
 const ACT_TRAVEL: f32 = 0.0;
@@ -152,7 +154,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 // Just received path, start on first segment!
                 let r_coords = road_coords(current_path_seg);
                 let r_tex1 = textureLoad(roads_tex, r_coords[1]);
-                activity_time = max(0.5, r_tex1.w); // length is tex1.w
+                activity_time = max(0.5, r_tex1.y); // length is tex1.y (was tex1.w)
                 current_seg = f32(current_path_seg);
                 prev_seg = current_seg; // No previous segment yet
             } else {
@@ -175,7 +177,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                         if next_path_seg != 0xFFFFFFFFu {
                             let nr_coords = road_coords(next_path_seg);
                             let nr_tex1 = textureLoad(roads_tex, nr_coords[1]);
-                            activity_time = max(0.5, nr_tex1.w) + overshoot; // Carry over distance
+                            activity_time = max(0.5, nr_tex1.y) + overshoot; // Carry over distance
                             prev_seg = current_seg;
                             current_seg = f32(next_path_seg);
                         } else {

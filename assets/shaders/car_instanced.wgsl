@@ -62,7 +62,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     if activity == 0.0 && current_seg != 0xFFFFFFFFu {
         let rw = i32(params.roads_tex_w);
         
-        let rbase = i32(current_seg * 2u);
+        let rbase = i32(current_seg * 4u);
         let rc0 = vec2<i32>(rbase % rw, rbase / rw);
         let rc1 = vec2<i32>((rbase + 1) % rw, (rbase + 1) / rw);
         let rtex0 = textureLoad(roads_tex, rc0, 0);
@@ -70,11 +70,11 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         
         let seg_a = vec2<f32>(rtex0.x, rtex0.y);
         let seg_b = vec2<f32>(rtex0.z, rtex0.w);
-        let seg_len = max(0.01, rtex1.w);
+        let seg_len = max(0.01, rtex1.y); // length is now tex1.y (was tex1.w)
         
         var start_at_b = false;
         if prev_seg != current_seg && prev_seg != 0xFFFFFFFFu {
-            let pbase = i32(prev_seg * 2u);
+            let pbase = i32(prev_seg * 4u);
             let pc0 = vec2<i32>(pbase % rw, pbase / rw);
             let ptex0 = textureLoad(roads_tex, pc0, 0);
             let pa = vec2<f32>(ptex0.x, ptex0.y);

@@ -85,12 +85,14 @@ struct GpuStats {
 @group(0) @binding(6) var<storage, read_write> congestion_buffer: array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> stats: GpuStats;
 
-fn road_coords(sid: u32) -> array<vec2<i32>, 2> {
-    let base = i32(sid * 2u);
+fn road_coords(sid: u32) -> array<vec2<i32>, 4> {
+    let base = i32(sid * 4u);
     let w = max(1, i32(params.roads_tex_w));
     let c0 = vec2<i32>(base % w, base / w);
     let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
-    return array<vec2<i32>, 2>(c0, c1);
+    let c2 = vec2<i32>((base + 2) % w, (base + 2) / w);
+    let c3 = vec2<i32>((base + 3) % w, (base + 3) / w);
+    return array<vec2<i32>, 4>(c0, c1, c2, c3);
 }
 
 @compute @workgroup_size(64)

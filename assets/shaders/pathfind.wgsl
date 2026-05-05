@@ -39,22 +39,14 @@ struct PathRequestQueue {
 @group(0) @binding(3) var<uniform> params: PathParams;
 @group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
 
-fn seg_coords(seg: u32) -> array<vec2<i32>, 2> {
-    let base = seg * 2u;
+fn seg_coords(seg: u32) -> array<vec2<i32>, 4> {
+    let base = seg * 4u;
     let w = max(1u, params.roads_tex_w);
     let c0 = vec2<i32>(i32(base % w), i32(base / w));
     let c1 = vec2<i32>(i32((base + 1u) % w), i32((base + 1u) / w));
-    return array<vec2<i32>, 2>(c0, c1);
-}
-
-// Conn packing: count in bits 24..31; three ids in bits 0..23 (8 bits each).
-fn unpack_conn(packed: f32) -> array<u32, 4> {
-    let p = bitcast<u32>(packed);
-    let count = (p >> 24u) & 0xFFu;
-    let a = (p >> 16u) & 0xFFu;
-    let b = (p >> 8u) & 0xFFu;
-    let c = p & 0xFFu;
-    return array<u32, 4>(count, a, b, c);
+    let c2 = vec2<i32>(i32((base + 2u) % w), i32((base + 2u) / w));
+    let c3 = vec2<i32>(i32((base + 3u) % w), i32((base + 3u) / w));
+    return array<vec2<i32>, 4>(c0, c1, c2, c3);
 }
 
 const MAX_FRONTIER: u32 = 1024u;
@@ -123,14 +115,26 @@ fn main(
                 let cur = frontier[i];
                 let coords = seg_coords(cur);
                 let t1 = textureLoad(roads_tex, coords[1]);
-                let cap = unpack_conn(t1.y);
-                let cbp = unpack_conn(t1.z);
-                let total_count = cap[0] + cbp[0];
+                let t2 = textureLoad(roads_tex, coords[2]);
+                let t3 = textureLoad(roads_tex, coords[3]);
+                
+                let count_a = u32(t1.z);
+                let count_b = u32(t1.w);
+                let total_count = count_a + count_b;
 
                 for (var n: u32 = 0u; n < 6u; n = n + 1u) {
                     var nb: u32;
-                    if n < cap[0] { nb = cap[n + 1u]; }
-                    else if n < total_count { nb = cbp[n - cap[0] + 1u]; }
+                    if n < count_a { 
+                        if (n == 0u) { nb = u32(t2.x); }
+                        else if (n == 1u) { nb = u32(t2.y); }
+                        else { nb = u32(t2.z); }
+                    }
+                    else if n < total_count { 
+                        let bn = n - count_a;
+                        if (bn == 0u) { nb = u32(t3.x); }
+                        else if (bn == 1u) { nb = u32(t3.y); }
+                        else { nb = u32(t3.z); }
+                    }
                     else { continue; }
                     
                     if nb >= params.segments_count { continue; }

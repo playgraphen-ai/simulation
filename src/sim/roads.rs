@@ -17,23 +17,31 @@ use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
 pub const ROAD_CAPACITY: u32 = 8192;
-pub const TEXELS_PER_SEGMENT: u32 = 2;
-/// Path texture width (ids) × capacity rows: one path per person, up to
-/// MAX_PATH_LEN segments. Separate texture from the segments.
-#[allow(dead_code)]
-pub const MAX_PATH_LEN: u32 = 256;
+pub const TEXELS_PER_SEGMENT: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
 pub struct RoadRow {
+    // Texel 0: Endpoints
     pub ax: f32,
     pub ay: f32,
     pub bx: f32,
     pub by: f32,
+    // Texel 1: Stats & Meta
     pub speed_mean: f32,
-    pub conn_a_packed: f32,
-    pub conn_b_packed: f32,
     pub length: f32,
+    pub count_a: f32,
+    pub count_b: f32,
+    // Texel 2: Connections A
+    pub conn_a0: f32,
+    pub conn_a1: f32,
+    pub conn_a2: f32,
+    pub _pad_a: f32,
+    // Texel 3: Connections B
+    pub conn_b0: f32,
+    pub conn_b1: f32,
+    pub conn_b2: f32,
+    pub _pad_b: f32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -64,6 +72,7 @@ impl Default for RoadData {
     fn default() -> Self {
         let total_texels = ROAD_CAPACITY * TEXELS_PER_SEGMENT;
         let side = (total_texels as f32).sqrt().ceil() as u32;
+        // Align width to TEXELS_PER_SEGMENT to ensure rows don't split segments
         let width = ((side + TEXELS_PER_SEGMENT - 1) / TEXELS_PER_SEGMENT) * TEXELS_PER_SEGMENT;
         let height = (total_texels + width - 1) / width;
         Self {
@@ -128,24 +137,28 @@ impl RoadData {
 
     pub fn refresh_row(&mut self, id: u32) {
         let seg = &self.segments[id as usize];
-        let pack = |ids: &[u32]| -> f32 {
-            let count = ids.len() as u32;
-            let a = ids.get(0).copied().unwrap_or(0);
-            let b = ids.get(1).copied().unwrap_or(0);
-            let c = ids.get(2).copied().unwrap_or(0);
-            // f32 mantissa is 24 bits — packing more than ~16M requires redesign.
-            let packed = (count << 24) | ((a & 0xFF) << 16) | ((b & 0xFF) << 8) | (c & 0xFF);
-            f32::from_bits(packed)
-        };
+        
         self.rows[id as usize] = RoadRow {
             ax: seg.a.0 as f32,
             ay: seg.a.1 as f32,
             bx: seg.b.0 as f32,
             by: seg.b.1 as f32,
+            
             speed_mean: seg.speed_mean,
-            conn_a_packed: pack(&seg.conn_a),
-            conn_b_packed: pack(&seg.conn_b),
             length: seg.length,
+            count_a: seg.conn_a.len() as f32,
+            count_b: seg.conn_b.len() as f32,
+
+            conn_a0: seg.conn_a.get(0).copied().unwrap_or(0) as f32,
+            conn_a1: seg.conn_a.get(1).copied().unwrap_or(0) as f32,
+            conn_a2: seg.conn_a.get(2).copied().unwrap_or(0) as f32,
+            _pad_a: 0.0,
+
+            conn_b0: seg.conn_b.get(0).copied().unwrap_or(0) as f32,
+            conn_b1: seg.conn_b.get(1).copied().unwrap_or(0) as f32,
+            conn_b2: seg.conn_b.get(2).copied().unwrap_or(0) as f32,
+            _pad_b: 0.0,
         };
     }
 }
+

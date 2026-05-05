@@ -217,12 +217,12 @@ fn prepare_path_buffers(
     }
 
     // Max buffer size for prev array is limit to 512MB
-    let max_prev_size = 67108864u64; // 64MB
+    let max_prev_size = 536870912u64; // 512MB
     let prev_size = (max_reqs as u64 * params.segments_count as u64 * 4).max(4).min(max_prev_size);
     if buffers.prev.is_none() || buffers.prev.as_ref().unwrap().size() < prev_size {
         buffers.prev = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("path_prev_buffer"),
-            size: max_prev_size, // Use fixed max allowed size
+            size: prev_size, 
             usage: BufferUsages::STORAGE,
             mapped_at_creation: false,
         }));
