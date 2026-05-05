@@ -113,6 +113,7 @@ const ACT_TRAVEL: f32 = 0.0;
 const ACT_HOME:   f32 = 1.0;
 const ACT_WORK:   f32 = 2.0;
 const ACT_SHOP:   f32 = 3.0;
+const ACT_ARRIVED: f32 = 4.0;
 
 fn rand(state: ptr<function, u32>) -> f32 {
     var x = *state;
@@ -360,18 +361,13 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                     } else {
                         // Arrived!
                         let dest_b_coords = building_coords(u32(destination));
-                        let b_tex0 = textureLoad(buildings_tex, dest_b_coords[0]);
                         var b_tex1 = textureLoad(buildings_tex, dest_b_coords[1]);
-
-                        let btype = b_tex0.z;
-                        if btype == 0.0 { activity = ACT_HOME; activity_time = params.home_duration; }
-                        else if btype == 1.0 { activity = ACT_WORK; activity_time = params.work_duration; }
-                        else if btype == 2.0 { activity = ACT_SHOP; activity_time = params.shop_duration; }
-                        else { activity = ACT_HOME; activity_time = params.home_duration; }
 
                         b_tex1.y = b_tex1.y + 1.0;
                         textureStore(buildings_tex, dest_b_coords[1], b_tex1);
                         path_cursor = 0.0;
+                        activity = ACT_ARRIVED;
+                        activity_time = stop_at;
                     }
                 }
             }
@@ -388,6 +384,15 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 textureStore(buildings_tex, h_coords[1], h_tex1);
             }
         }
+    } else if activity == ACT_ARRIVED {
+        let dest_b_coords = building_coords(u32(destination));
+        let b_tex0 = textureLoad(buildings_tex, dest_b_coords[0]);
+        let btype = b_tex0.z;
+        
+        if btype == 0.0 { activity = ACT_HOME; activity_time = params.home_duration; }
+        else if btype == 1.0 { activity = ACT_WORK; activity_time = params.work_duration; }
+        else if btype == 2.0 { activity = ACT_SHOP; activity_time = params.shop_duration; }
+        else { activity = ACT_HOME; activity_time = params.home_duration; }
     } else if activity == ACT_HOME || activity == ACT_WORK || activity == ACT_SHOP {
         activity_time = activity_time - params.dt;
     }

@@ -60,7 +60,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         0.0, 0.0, 1.0
     );
 
-    if activity == 0.0 && current_seg != 0xFFFFFFFFu {
+    if (activity == 0.0 || activity == 4.0) && current_seg != 0xFFFFFFFFu {
         let rw = i32(params.roads_tex_w);
         
         let rbase = i32(current_seg * 4u);
@@ -152,8 +152,12 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.world_normal = rot_matrix * vertex.normal;
     out.uv = vertex.uv;
 
-    let hue = fract(vertex.car_id * 0.6180339887);
-    out.color = hsv2rgb(vec3<f32>(hue, 0.8, 0.9));
+    if activity == 4.0 {
+        out.color = vec3<f32>(1.0, 1.0, 1.0);
+    } else {
+        let hue = fract(vertex.car_id * 0.6180339887);
+        out.color = hsv2rgb(vec3<f32>(hue, 0.8, 0.9));
+    }
 
     return out;
 }
