@@ -17,7 +17,6 @@ use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
 pub const ROAD_CAPACITY: u32 = 8192;
-pub const MAX_LINKS_TOTAL: u32 = 32768; // Increased capacity for individual links
 pub const TEXELS_PER_SEGMENT: u32 = 4;
 
 #[repr(C)]
