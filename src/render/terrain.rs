@@ -6,7 +6,9 @@ use bevy::{
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct TerrainMaterial {
-    // We can add uniforms or textures here later
+    #[texture(0, dimension = "2d")]
+    #[sampler(1)]
+    pub grass: Handle<Image>,
 }
 
 impl Material for TerrainMaterial {

@@ -35,6 +35,9 @@ fn fbm(p: vec2<f32>) -> f32 {
     return value;
 }
 
+@group(3) @binding(0) var grass_texture: texture_2d<f32>;
+@group(3) @binding(1) var grass_sampler: sampler;
+
 @fragment
 fn fragment(
     mesh: VertexOutput,
@@ -49,10 +52,15 @@ fn fragment(
     let n_base = fbm(pos * 0.5);   // Variations larges
     let n_detail = fbm(pos * 2.0); // Variations fines
 
+    // Échantillonnage de la texture d'herbe
+    // On répète la texture tous les 4 mètres par exemple
+    let grass_uv = pos * 0.25;
+    let grass_tex_color = textureSample(grass_texture, grass_sampler, grass_uv).rgb;
+
     // Définition des couleurs de base, modulées par le bruit
     // On multiplie la couleur de base par une valeur issue du bruit pour casser l'uniformité
     let color_water = vec3<f32>(0.15, 0.45, 0.8) * (0.85 + 0.3 * n_detail);
-    let color_plains = vec3<f32>(0.4, 0.6, 0.3) * (0.6 + 0.8 * n_base);
+    let color_plains = grass_tex_color * (0.8 + 0.4 * n_base);
     let color_forest = vec3<f32>(0.2, 0.4, 0.2) * (0.7 + 0.6 * fbm(pos * 1.5));
     let color_desert = vec3<f32>(0.85, 0.75, 0.4) * (0.9 + 0.2 * n_base);
 

@@ -54,6 +54,7 @@ use super::terrain::TerrainMaterial;
 
 fn setup_ground(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
     grid: Res<CityGrid>,
@@ -114,6 +115,7 @@ fn setup_ground(
     mesh.compute_normals(); // Let Bevy compute smooth normals
     
     let mat = materials.add(TerrainMaterial {
+        grass: asset_server.load("textures/grass.png"),
     });
     
     commands.spawn((
