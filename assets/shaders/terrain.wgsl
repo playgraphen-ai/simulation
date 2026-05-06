@@ -37,6 +37,8 @@ fn fbm(p: vec2<f32>) -> f32 {
 
 @group(3) @binding(0) var grass_texture: texture_2d<f32>;
 @group(3) @binding(1) var grass_sampler: sampler;
+@group(3) @binding(2) var splat_texture: texture_2d<f32>;
+@group(3) @binding(3) var splat_sampler: sampler;
 
 @fragment
 fn fragment(
@@ -70,6 +72,18 @@ fn fragment(
                       color_forest * weights.b +
                       color_desert * weights.a;
 
+    // Échantillonnage de la Splat Map pour les routes
+    // On utilise la taille de la texture pour normaliser les UVs
+    let splat_dim = vec2<f32>(textureDimensions(splat_texture));
+    let splat_uv = pos / splat_dim;
+    let road_mask = textureSample(splat_texture, splat_sampler, splat_uv).r;
+    
+    // Couleur simple pour la route
+    let road_color = vec3<f32>(0.15, 0.15, 0.18);
+    
+    // Mix la route au dessus du terrain
+    let with_roads = mix(final_color, road_color, road_mask);
+
     // Output final
-    return vec4<f32>(final_color, 1.0);
+    return vec4<f32>(with_roads, 1.0);
 }

@@ -17,7 +17,7 @@ impl Plugin for WorldRenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WorldVisuals>()
             .add_systems(Startup, (setup_ground.after(crate::sim::startup), build_palette))
-            .add_systems(Update, (sync_zone_view, sync_road_view, sync_building_view));
+            .add_systems(Update, (sync_zone_view, sync_road_view, sync_building_view, sync_splat_map_system));
     }
 }
 
@@ -52,16 +52,34 @@ use bevy::asset::RenderAssetUsages;
 use crate::sim::grid::Biome;
 use super::terrain::TerrainMaterial;
 
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
+
+#[derive(Resource)]
+pub struct TerrainSplatMap(pub Handle<Image>);
+
 fn setup_ground(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
     grid: Res<CityGrid>,
 ) {
     let w = grid.width;
     let h = grid.height;
     
+    // Create the splat map image (R8Unorm is enough for a mask: 0 = grass, 255 = road)
+    let mut splat_image = Image::new_fill(
+        Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        &[0],
+        TextureFormat::R8Unorm,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    splat_image.texture_descriptor.usage |= TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING;
+    let splat_handle = images.add(splat_image);
+    commands.insert_resource(TerrainSplatMap(splat_handle.clone()));
+
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity((w * h) as usize);
     let mut normals: Vec<[f32; 3]> = Vec::with_capacity((w * h) as usize);
     let mut colors: Vec<[f32; 4]> = Vec::with_capacity((w * h) as usize);
@@ -116,6 +134,7 @@ fn setup_ground(
     
     let mat = materials.add(TerrainMaterial {
         grass: asset_server.load("textures/grass.png"),
+        splat_map: splat_handle,
     });
     
     commands.spawn((
@@ -201,48 +220,14 @@ fn sync_zone_view(
 fn sync_road_view(
     mut commands: Commands,
     roads: Res<RoadData>,
-    grid: Res<CityGrid>,
-    vis: Res<WorldVisuals>,
-    existing: Query<(Entity, &RoadMarker)>,
+    existing: Query<Entity, With<RoadMarker>>,
 ) {
     if !roads.is_changed() { return; }
-    let n = roads.segments.len() as u32;
-    let mut existing_ids = std::collections::HashSet::new();
-    for (e, m) in &existing {
-        if m.0 >= n {
-            commands.entity(e).despawn();
-        } else {
-            existing_ids.insert(m.0);
-        }
-    }
-    for (id, seg) in roads.segments.iter().enumerate() {
-        let id_u32 = id as u32;
-        if existing_ids.contains(&id_u32) { continue; }
-        let x = (seg.a.0 + seg.b.0) as f32 * 0.5 + 0.5;
-        let z = (seg.a.1 + seg.b.1) as f32 * 0.5 + 0.5;
-        // Rotate so the straight road segment aligns with the A—B axis.
-        let dx = seg.b.0 as f32 - seg.a.0 as f32;
-        let dz = seg.b.1 as f32 - seg.a.1 as f32;
-        let angle = dz.atan2(dx);
-        let len = (dx * dx + dz * dz).sqrt();
-
-        let elev_a = grid.elevations[grid.idx(seg.a.0, seg.a.1)];
-        let elev_b = grid.elevations[grid.idx(seg.b.0, seg.b.1)];
-        let y = (elev_a + elev_b) * 0.5 + 0.01;
-
-        let mut tf = Transform::from_xyz(x, y, z).with_rotation(Quat::from_rotation_y(-angle));
-        tf.scale.x = len;
-        tf.scale.z = 2.0; // 2 tiles wide (visually)
-
-        // Pitch road if there is an elevation difference
-        let pitch = (elev_b - elev_a).atan2(len);
-        tf.rotate_local_z(-pitch);
-
-        commands.spawn((
-            SceneRoot(vis.road_scene.clone()),
-            tf,
-            RoadMarker(id_u32),
-        ));
+    // We no longer spawn GLTF meshes for roads, because we render them directly
+    // on the terrain using the splat map. So we just ensure any legacy road 
+    // marker entities are despawned.
+    for e in &existing {
+        commands.entity(e).despawn();
     }
 }
 
@@ -290,5 +275,26 @@ fn scene_for(vis: &WorldVisuals, bt: ZoneType, lvl: u32) -> Handle<Scene> {
         ZoneType::Residential => vis.residential_scenes[lvl].clone(),
         ZoneType::Office => vis.office_scenes[lvl].clone(),
         ZoneType::Shop => vis.shop_scenes[lvl].clone(),
+    }
+}
+
+fn sync_splat_map_system(
+    grid: Res<CityGrid>,
+    splat_map_res: Option<Res<TerrainSplatMap>>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    if !grid.is_changed() { return; }
+    if let Some(res) = splat_map_res {
+        if let Some(img) = images.get_mut(&res.0) {
+            let mut data = vec![0u8; (grid.width * grid.height) as usize];
+            for y in 0..grid.height {
+                for x in 0..grid.width {
+                    if let Some(Tile::Road(_)) = grid.get(x, y) {
+                        data[(y * grid.width + x) as usize] = 255;
+                    }
+                }
+            }
+            img.data = Some(data);
+        }
     }
 }

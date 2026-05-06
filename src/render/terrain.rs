@@ -9,6 +9,9 @@ pub struct TerrainMaterial {
     #[texture(0, dimension = "2d")]
     #[sampler(1)]
     pub grass: Handle<Image>,
+    #[texture(2, dimension = "2d")]
+    #[sampler(3)]
+    pub splat_map: Handle<Image>,
 }
 
 impl Material for TerrainMaterial {
