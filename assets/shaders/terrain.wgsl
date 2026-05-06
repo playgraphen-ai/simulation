@@ -44,46 +44,51 @@ fn fbm(p: vec2<f32>) -> f32 {
 fn fragment(
     mesh: VertexOutput,
 ) -> @location(0) vec4<f32> {
-    // Les poids de splatting passés par le code Rust
+    // Les poids de splatting passés par le code Rust (Biomes)
     let weights = mesh.color;
     
-    // On utilise la position dans le monde (X, Z) pour échantillonner le bruit
+    // On utilise la position dans le monde (X, Z)
     let pos = mesh.world_position.xz;
 
-    // Génération de quelques couches de bruit
-    let n_base = fbm(pos * 0.5);   // Variations larges
-    let n_detail = fbm(pos * 2.0); // Variations fines
-
+    // Échantillonnage de la Splat Map pour les routes
+    // On utilise floor(pos) pour que la route soit parfaitement alignée sur la grille
+    let splat_dim = textureDimensions(splat_texture);
+    let splat_coord = clamp(vec2<i32>(floor(pos)), vec2<i32>(0), vec2<i32>(splat_dim) - vec2<i32>(1));
+    // On utilise textureLoad pour une lecture brute sans interpolation (pixel perfect)
+    let road_mask = textureLoad(splat_texture, splat_coord, 0).r;
+    
     // Échantillonnage de la texture d'herbe
-    // On répète la texture tous les 4 mètres par exemple
-    let grass_uv = pos * 0.25;
+    // On augmente la fréquence pour que l'herbe soit détaillée à l'échelle d'une voiture
+    // Si une case (1.0 unité) est une voiture (~4m), pos * 2.0 répète la texture 2 fois par case.
+    let grass_uv = pos * 1.5; 
     let grass_tex_color = textureSample(grass_texture, grass_sampler, grass_uv).rgb;
 
-    // Définition des couleurs de base, modulées par le bruit
-    // On multiplie la couleur de base par une valeur issue du bruit pour casser l'uniformité
-    let color_water = vec3<f32>(0.15, 0.45, 0.8) * (0.85 + 0.3 * n_detail);
-    let color_plains = grass_tex_color * (0.8 + 0.4 * n_base);
-    let color_forest = vec3<f32>(0.2, 0.4, 0.2) * (0.7 + 0.6 * fbm(pos * 1.5));
-    let color_desert = vec3<f32>(0.85, 0.75, 0.4) * (0.9 + 0.2 * n_base);
+    // Génération de bruit pour les variations de couleur
+    let n_base = fbm(pos * 0.1);   // Variations larges (biomes/terrain)
+    let n_detail = fbm(pos * 1.0); // Variations fines (détails au sol)
+
+    // Définition des couleurs de base, modulées par le bruit et la texture
+    let color_water = vec3<f32>(0.1, 0.3, 0.6) * (0.9 + 0.2 * n_detail);
+    let color_plains = grass_tex_color * (0.85 + 0.3 * n_base);
+    let color_forest = grass_tex_color * vec3<f32>(0.6, 0.8, 0.5) * (0.7 + 0.4 * fbm(pos * 0.5));
+    let color_desert = vec3<f32>(0.8, 0.7, 0.5) * (0.9 + 0.2 * n_base);
 
     // Mélange final via les poids de splatting
-    let final_color = color_water * weights.r +
+    var final_color = color_water * weights.r +
                       color_plains * weights.g +
                       color_forest * weights.b +
                       color_desert * weights.a;
 
-    // Échantillonnage de la Splat Map pour les routes
-    // On utilise la taille de la texture pour normaliser les UVs
-    let splat_dim = vec2<f32>(textureDimensions(splat_texture));
-    let splat_uv = pos / splat_dim;
-    let road_mask = textureSample(splat_texture, splat_sampler, splat_uv).r;
+    // Couleur de la route (Gris foncé bitume)
+    // On ajoute un peu de bruit de détail sur la route pour qu'elle ne soit pas plate
+    let road_noise = n_detail * 0.05;
+    let road_color = vec3<f32>(0.15, 0.15, 0.17) + road_noise;
     
-    // Couleur simple pour la route
-    let road_color = vec3<f32>(0.15, 0.15, 0.18);
-    
-    // Mix la route au dessus du terrain
-    let with_roads = mix(final_color, road_color, road_mask);
+    // On peut aussi ajouter un petit liseré ou une transition si on veut, 
+    // mais ici on va rester sur du net pour le côté "case".
+    // On mix la route au dessus du terrain
+    final_color = mix(final_color, road_color, road_mask);
 
     // Output final
-    return vec4<f32>(with_roads, 1.0);
+    return vec4<f32>(final_color, 1.0);
 }

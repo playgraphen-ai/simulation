@@ -90,8 +90,8 @@ fn setup_ground(
         for x in 0..w {
             let i = grid.idx(x, y);
             let elev = grid.elevations[i];
-            // Center the grid on the tile visually
-            positions.push([x as f32 + 0.5, elev, y as f32 + 0.5]);
+            // Remove the 0.5 offset to align vertices with grid corners
+            positions.push([x as f32, elev, y as f32]);
             
             // Encode biomes as splat weights: Water(R), Plains(G), Forest(B), Desert(A)
             let color = match grid.biomes[i] {
