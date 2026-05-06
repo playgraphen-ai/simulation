@@ -8,6 +8,7 @@
 pub mod camera;
 pub mod world;
 pub mod cars;
+pub mod terrain;
 
 use bevy::prelude::*;
 
@@ -19,6 +20,7 @@ impl Plugin for WorldPlugin {
             camera::CameraPlugin,
             world::WorldRenderPlugin,
             cars::CarsRenderPlugin,
+            terrain::TerrainRenderPlugin,
         ));
     }
 }

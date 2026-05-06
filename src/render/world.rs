@@ -50,11 +50,12 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::mesh::Indices;
 use bevy::asset::RenderAssetUsages;
 use crate::sim::grid::Biome;
+use super::terrain::TerrainMaterial;
 
 fn setup_ground(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
     grid: Res<CityGrid>,
 ) {
     let w = grid.width;
@@ -73,11 +74,12 @@ fn setup_ground(
             // Center the grid on the tile visually
             positions.push([x as f32 + 0.5, elev, y as f32 + 0.5]);
             
+            // Encode biomes as splat weights: Water(R), Plains(G), Forest(B), Desert(A)
             let color = match grid.biomes[i] {
-                Biome::Water => [0.15, 0.45, 0.8, 1.0],
-                Biome::Plains => [0.4, 0.6, 0.3, 1.0],
-                Biome::Forest => [0.2, 0.4, 0.2, 1.0],
-                Biome::Desert => [0.85, 0.75, 0.4, 1.0],
+                Biome::Water => [1.0, 0.0, 0.0, 0.0],
+                Biome::Plains => [0.0, 1.0, 0.0, 0.0],
+                Biome::Forest => [0.0, 0.0, 1.0, 0.0],
+                Biome::Desert => [0.0, 0.0, 0.0, 1.0],
             };
             colors.push(color);
             normals.push([0.0, 1.0, 0.0]); // Simple upward normals for flat shading look
@@ -111,9 +113,7 @@ fn setup_ground(
     mesh.insert_indices(Indices::U32(indices));
     mesh.compute_normals(); // Let Bevy compute smooth normals
     
-    let mat = materials.add(StandardMaterial {
-        perceptual_roughness: 0.95,
-        ..default()
+    let mat = materials.add(TerrainMaterial {
     });
     
     commands.spawn((
