@@ -10,7 +10,7 @@ pub struct MenuSettings {
 
 impl Default for MenuSettings {
     fn default() -> Self {
-        Self { grid_x: 4, grid_y: 4, population: 100 }
+        Self { grid_x: 4, grid_y: 4, population: 10000 }
     }
 }
 
@@ -45,9 +45,9 @@ pub fn setup_menu(mut commands: Commands) {
             Node { margin: UiRect::bottom(Val::Px(40.0)), ..default() },
         ));
 
-        spawn_btn(p, "Small City (3x3 blocks, 50 pop)", MenuAction::Small);
-        spawn_btn(p, "Medium City (6x5 blocks, 300 pop)", MenuAction::Medium);
-        spawn_btn(p, "Large City (20x16 blocks, 1000 pop)", MenuAction::Large);
+        spawn_btn(p, "Small City (3x3 blocks, 10k pop)", MenuAction::Small);
+        spawn_btn(p, "Medium City (6x5 blocks, 10k pop)", MenuAction::Medium);
+        spawn_btn(p, "Large City (20x16 blocks, 10k pop)", MenuAction::Large);
     });
 }
 
@@ -55,7 +55,7 @@ fn spawn_btn(p: &mut ChildSpawnerCommands, text: &str, action: MenuAction) {
     p.spawn((
         Button,
         Node {
-            width: Val::Px(400.0),
+            width: Val::Px(450.0),
             height: Val::Px(60.0),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
@@ -83,9 +83,9 @@ pub fn handle_menu_actions(
         match *interaction {
             Interaction::Pressed => {
                 match action {
-                    MenuAction::Small => { settings.grid_x = 3; settings.grid_y = 3; settings.population = 50; }
-                    MenuAction::Medium => { settings.grid_x = 6; settings.grid_y = 5; settings.population = 300; }
-                    MenuAction::Large => { settings.grid_x = 20; settings.grid_y = 16; settings.population = 1000; }
+                    MenuAction::Small => { settings.grid_x = 3; settings.grid_y = 3; settings.population = 10000; }
+                    MenuAction::Medium => { settings.grid_x = 6; settings.grid_y = 5; settings.population = 10000; }
+                    MenuAction::Large => { settings.grid_x = 20; settings.grid_y = 16; settings.population = 10000; }
                 }
                 if let Ok(e) = root.single() {
                     commands.entity(e).despawn();
