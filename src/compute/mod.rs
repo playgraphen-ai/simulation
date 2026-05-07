@@ -1,20 +1,9 @@
 //! Compute layer.
 //!
-//! Two-level design:
-//!
-//! 1. **CPU fallback ("fast path")**: a tight loop that reproduces exactly what
-//!    the compute shaders will do — activity countdown, destination picking,
-//!    path progression, segment speed update. This keeps the whole game
-//!    playable while the GPU pipeline is wired up.
-//! 2. **GPU compute path**: upload the three data textures, dispatch the
-//!    `sim_people.wgsl` and `pathfind.wgsl` shaders, read counters back. The
-//!    shaders are authored and present in assets/shaders/; binding them into
-//!    Bevy's RenderApp pipeline cache is the remaining step.
-//!
-//! The CPU fallback is always run. When the GPU path is enabled, it will
-//! replace the CPU body.
+//! GPU compute path: upload the three data textures, dispatch the
+//! `sim_people.wgsl` and `pathfind.wgsl` shaders, read counters back.
+//! The CPU fallback has been removed to free up cycles.
 
-pub mod cpu_sim;
 pub mod spawn;
 pub mod gpu_sim;
 pub mod gpu_pathfinding;
@@ -69,8 +58,7 @@ pub struct ComputePlugin;
 
 impl Plugin for ComputePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<cpu_sim::SimTiming>()
-            .init_resource::<gpu_sim::GpuSimParams>()
+        app.init_resource::<gpu_sim::GpuSimParams>()
             .init_resource::<gpu_sim::GpuSimTextures>()
             .init_resource::<SimScheduleState>()
             .add_plugins(gpu_sim::GpuSimPlugin)
@@ -81,7 +69,6 @@ impl Plugin for ComputePlugin {
                 update_schedule_state,
                 sync_gpu_textures_and_params,
                 gpu_sim::apply_gpu_readback,
-                cpu_sim::cpu_sim_tick,
                 upload_dirty_textures_system,
             ).chain().run_if(in_state(AppState::InGame)));
     }
