@@ -79,6 +79,7 @@ fn queue_texture_updates_system(
     mut people: ResMut<PeopleData>,
     mut roads: ResMut<RoadData>,
     mut buildings: ResMut<BuildingData>,
+    grid: Res<crate::sim::grid::CityGrid>,
 ) {
     let mut ext = gpu_sim::ExtractedTextureUpdates::default();
     if people.dirty {
@@ -137,6 +138,12 @@ fn queue_texture_updates_system(
         }
         buildings.dirty = false;
     }
+    
+    // Pass elevations to the GPU once initially or when grid changes
+    if grid.is_added() || grid.is_changed() {
+        ext.elevations = Some(grid.elevations.clone());
+    }
+
     commands.insert_resource(ext);
 }
 

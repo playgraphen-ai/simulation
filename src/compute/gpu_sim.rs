@@ -15,6 +15,7 @@ pub struct ExtractedTextureUpdates {
     pub roads: Option<Vec<u8>>,
     pub road_points: Option<Vec<f32>>,
     pub buildings: Option<Vec<u8>>,
+    pub elevations: Option<Vec<f32>>,
 }
 
 pub fn apply_texture_updates(
@@ -90,6 +91,25 @@ pub fn apply_texture_updates(
                     TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(width * 16),
+                        rows_per_image: None,
+                    },
+                    Extent3d { width, height: rows, depth_or_array_layers: 1 }
+                );
+            }
+        }
+    }
+    if let (Some(data), Some(handle)) = (&updates.elevations, &textures.elevations) {
+        if let Some(gpu_img) = gpu_images.get(handle) {
+            let data_bytes: &[u8] = bytemuck::cast_slice(data);
+            let width = params.grid_w;
+            let rows = params.grid_h;
+            if rows > 0 {
+                render_queue.write_texture(
+                    gpu_img.texture.as_image_copy(),
+                    data_bytes,
+                    TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(width * 4), // R32Float is 4 bytes
                         rows_per_image: None,
                     },
                     Extent3d { width, height: rows, depth_or_array_layers: 1 }
