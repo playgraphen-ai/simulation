@@ -51,9 +51,24 @@ pub struct RoadRow {
     pub count_b: f32,
     // Texel 4: Extra metadata
     pub road_type: f32, // 0 for Normal, 1 for Highway
-    pub unused1: f32,
+    pub major_id: f32,  // ID in the major graph, or -1.0
     pub unused2: f32,
     pub unused3: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
+pub struct MajorRoadRow {
+    pub ax: f32, pub ay: f32,
+    pub bx: f32, pub by: f32,
+    pub speed_mean: f32,
+    pub length: f32,
+    pub original_id: u32,
+    pub count_a: u32,
+    pub count_b: u32,
+    pub conn_a: [i32; 4],
+    pub conn_b: [i32; 4],
+    pub pad: [u32; 2],
 }
 
 /// A single link between two adjacent tiles.
@@ -79,6 +94,7 @@ pub struct RoadSegment {
     pub length: f32,
     pub links_offset: u32,
     pub road_type: RoadType,
+    pub major_id: Option<u32>,
 }
 
 #[derive(Resource)]
@@ -88,6 +104,7 @@ pub struct RoadData {
     /// All points (tiles) of all segments, packed for the GPU.
     pub all_points: Vec<(u32, u32)>,
     pub rows: Vec<RoadRow>,
+    pub major_rows: Vec<MajorRoadRow>,
     pub tex_width: u32,
     pub tex_height: u32,
     pub dirty: bool,
@@ -108,6 +125,7 @@ impl Default for RoadData {
             segments: Vec::new(),
             all_points: Vec::new(),
             rows: vec![RoadRow::default(); ROAD_CAPACITY as usize],
+            major_rows: Vec::new(),
             tex_width: width,
             tex_height: height,
             dirty: true,
@@ -198,6 +216,7 @@ impl RoadData {
                         length,
                         links_offset: 0,
                         road_type: rtype,
+                        major_id: None,
                     });
                 }
             }
@@ -241,6 +260,7 @@ impl RoadData {
                 length,
                 links_offset: 0,
                 road_type: rtype,
+                major_id: None,
             });
         }
 
@@ -288,6 +308,54 @@ impl RoadData {
 
         self.segments = new_segments;
         self.usage.resize(self.segments.len(), 0);
+
+        // Build Major Graph
+        self.major_rows.clear();
+        let mut original_to_major = std::collections::HashMap::new();
+        for (id, seg) in self.segments.iter().enumerate() {
+            if seg.road_type == RoadType::Highway {
+                let major_id = self.major_rows.len() as u32;
+                original_to_major.insert(id as u32, major_id);
+                self.major_rows.push(MajorRoadRow {
+                    ax: seg.a.0 as f32, ay: seg.a.1 as f32,
+                    bx: seg.b.0 as f32, by: seg.b.1 as f32,
+                    speed_mean: seg.speed_mean,
+                    length: seg.length,
+                    original_id: id as u32,
+                    conn_a: [-1; 4],
+                    conn_b: [-1; 4],
+                    ..default()
+                });
+            }
+        }
+        for major_id in 0..self.major_rows.len() {
+            let orig_id = self.major_rows[major_id].original_id;
+            let seg = &self.segments[orig_id as usize];
+            let mut count_a = 0;
+            for &conn in &seg.conn_a {
+                if let Some(&m_conn) = original_to_major.get(&conn) {
+                    if count_a < 4 {
+                        self.major_rows[major_id].conn_a[count_a] = m_conn as i32;
+                        count_a += 1;
+                    }
+                }
+            }
+            self.major_rows[major_id].count_a = count_a as u32;
+            let mut count_b = 0;
+            for &conn in &seg.conn_b {
+                if let Some(&m_conn) = original_to_major.get(&conn) {
+                    if count_b < 4 {
+                        self.major_rows[major_id].conn_b[count_b] = m_conn as i32;
+                        count_b += 1;
+                    }
+                }
+            }
+            self.major_rows[major_id].count_b = count_b as u32;
+        }
+        for (id, seg) in self.segments.iter_mut().enumerate() {
+            seg.major_id = original_to_major.get(&(id as u32)).copied();
+        }
+
         self.rows.fill(RoadRow::default());
         for i in 0..self.segments.len() {
             self.refresh_row(i as u32);
@@ -336,6 +404,7 @@ impl RoadData {
                 RoadType::Normal => 0.0,
                 RoadType::Highway => 1.0,
             },
+            major_id: seg.major_id.map(|m| m as f32).unwrap_or(-1.0),
             ..default()
         };
     }

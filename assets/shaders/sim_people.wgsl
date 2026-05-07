@@ -224,12 +224,23 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             // Determine if we are travelling from A to B or B to A
             var start_at_b = false;
+            var is_jump = false; // Flag for hierarchical non-contiguous path
+
             if real_prev_seg != u32(current_seg) && real_prev_seg != 0xFFFFFFFFu {
                 let p_coords = road_coords(real_prev_seg);
                 let p_tex0 = textureLoad(roads_tex, p_coords[0]);
                 let seg_b = vec2<f32>(r_tex0.z, r_tex0.w);
+                let seg_a = vec2<f32>(r_tex0.x, r_tex0.y);
+                
+                // Normal adjacency
                 if (p_tex0.x == seg_b.x && p_tex0.y == seg_b.y) || (p_tex0.z == seg_b.x && p_tex0.w == seg_b.y) {
                     start_at_b = true;
+                } else if !((p_tex0.x == seg_a.x && p_tex0.y == seg_a.y) || (p_tex0.z == seg_a.x && p_tex0.w == seg_a.y)) {
+                    // Not connected at all -> Hierarchical jump!
+                    // We just arrived at a highway from a local road, or vice versa.
+                    is_jump = true;
+                    // Pick an arbitrary start direction (e.g. A to B)
+                    start_at_b = false;
                 }
             } else if real_prev_seg == u32(current_seg) {
                 let next_step = current_step + 1u;
@@ -238,16 +249,20 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                     let nr_coords = road_coords(next_path_seg);
                     let nr_tex0 = textureLoad(roads_tex, nr_coords[0]);
                     let seg_a = vec2<f32>(r_tex0.x, r_tex0.y);
+                    let seg_b = vec2<f32>(r_tex0.z, r_tex0.w);
                     if (nr_tex0.x == seg_a.x && nr_tex0.y == seg_a.y) || (nr_tex0.z == seg_a.x && nr_tex0.w == seg_a.y) {
                         start_at_b = true;
+                    } else if !((nr_tex0.x == seg_b.x && nr_tex0.y == seg_b.y) || (nr_tex0.z == seg_b.x && nr_tex0.w == seg_b.y)) {
+                        is_jump = true;
+                        start_at_b = false; // Default
                     }
                 } else {
                     if texel2.z > texel2.w { start_at_b = true; }
                 }
             }
 
-            if activity_time < 0.0 {
-                let start_t = texel2.z;
+            if activity_time < 0.0 || is_jump {
+                let start_t = select(texel2.z, 0.0, is_jump); // If jump, start at beginning of segment
                 if start_at_b {
                     activity_time = seg_len * start_t;
                     prev_seg = f32(current_path_seg) + 1000000.0;
@@ -372,17 +387,29 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                         let next_seg_len = max(0.5, nr_tex1.w);
 
                         var next_start_at_b = false;
+                        var next_is_jump = false;
                         let n_tex0 = textureLoad(roads_tex, nr_coords[0]);
                         let nseg_b = vec2<f32>(n_tex0.z, n_tex0.w);
+                        let nseg_a = vec2<f32>(n_tex0.x, n_tex0.y);
+                        
                         if (r_tex0.x == nseg_b.x && r_tex0.y == nseg_b.y) || (r_tex0.z == nseg_b.x && r_tex0.w == nseg_b.y) {
                             next_start_at_b = true;
+                        } else if !((r_tex0.x == nseg_a.x && r_tex0.y == nseg_a.y) || (r_tex0.z == nseg_a.x && r_tex0.w == nseg_a.y)) {
+                            next_is_jump = true;
                         }
 
-                        activity_time = next_seg_len + overshoot;
-                        if next_start_at_b {
-                            prev_seg = f32(current_path_seg) + 1000000.0;
+                        if next_is_jump {
+                            // If jumping to the next segment, reset time completely (teleport)
+                            activity_time = next_seg_len;
+                            // Set a special prev_seg to force the jump logic on the next frame
+                            prev_seg = f32(0xFFFFFFFFu);
                         } else {
-                            prev_seg = f32(current_path_seg);
+                            activity_time = next_seg_len + overshoot;
+                            if next_start_at_b {
+                                prev_seg = f32(current_path_seg) + 1000000.0;
+                            } else {
+                                prev_seg = f32(current_path_seg);
+                            }
                         }
                         current_seg = f32(next_path_seg);
                     } else {

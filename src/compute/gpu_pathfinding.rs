@@ -30,6 +30,11 @@ pub struct PathRequestsResource {
     pub list: Vec<PathRequest>,
 }
 
+#[derive(Resource, Clone, ExtractResource, Default)]
+pub struct ExtractedMajorGraph {
+    pub rows: Vec<crate::sim::roads::MajorRoadRow>,
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable, Resource, ExtractResource, ShaderType)]
 pub struct PathParams {
@@ -41,11 +46,22 @@ pub struct PathParams {
     pub slice_end: u32,
     pub do_dispatch: u32,
     pub reset_path_queue: u32,
+    pub major_segments_count: u32,
 }
 
 impl Default for PathParams {
     fn default() -> Self {
-        Self { segments_count: 0, roads_tex_w: 0, max_path_len: 64, request_count: 0, slice_start: 0, slice_end: 0, do_dispatch: 0, reset_path_queue: 0 }
+        Self { 
+            segments_count: 0, 
+            roads_tex_w: 0, 
+            max_path_len: 64, 
+            request_count: 0, 
+            slice_start: 0, 
+            slice_end: 0, 
+            do_dispatch: 0, 
+            reset_path_queue: 0,
+            major_segments_count: 0,
+        }
     }
 }
 
@@ -57,9 +73,11 @@ impl Plugin for GpuPathfindingPlugin {
         let shader = app.world_mut().resource::<AssetServer>().load("shaders/pathfind.wgsl");
         app.init_resource::<PathParams>();
         app.init_resource::<PathRequestsResource>();
+        app.init_resource::<ExtractedMajorGraph>();
 
         app.add_plugins(ExtractResourcePlugin::<PathParams>::default());
         app.add_plugins(ExtractResourcePlugin::<PathRequestsResource>::default());
+        app.add_plugins(ExtractResourcePlugin::<ExtractedMajorGraph>::default());
         
         let render_app = app.sub_app_mut(RenderApp);
         render_app
@@ -85,6 +103,7 @@ pub struct GpuPathBuffers {
     pub prev: Option<Buffer>,
     pub paths: Option<Buffer>,
     pub params: Option<Buffer>,
+    pub major_graph: Option<Buffer>,
     pub bind_group: Option<BindGroup>,
     pub max_requests: u32,
 }
@@ -149,6 +168,16 @@ impl FromWorld for GpuPathfindingPipeline {
                 },
                 count: None,
             },
+            BindGroupLayoutEntry {
+                binding: 5,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ];
 
         let layout = render_device.create_bind_group_layout(Some("gpu_path_layout"), &entries);
@@ -182,6 +211,7 @@ fn prepare_path_buffers(
     requests: Res<PathRequestsResource>,
     gpu_images: Res<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>,
     gpu_sim_textures: Res<crate::compute::gpu_sim::GpuSimTextures>,
+    major_graph: Res<ExtractedMajorGraph>,
     mut buffers: ResMut<GpuPathBuffers>,
 ) {
     let max_reqs = 65536u32;
@@ -189,6 +219,7 @@ fn prepare_path_buffers(
 
     // IMPORTANT: Sync max_path_len to match the search window.
     params.max_path_len = 512;
+    params.major_segments_count = major_graph.rows.len() as u32;
 
     let people_capacity = 65536u64; // Max people
     let paths_size = people_capacity * 512u64 * 4u64; // 512 max path len * 4 bytes per id
@@ -232,6 +263,30 @@ fn prepare_path_buffers(
         }));
     }
 
+    // Major Graph buffer
+    if !major_graph.rows.is_empty() {
+        let size = (major_graph.rows.len() * std::mem::size_of::<crate::sim::roads::MajorRoadRow>()) as u64;
+        if buffers.major_graph.is_none() || buffers.major_graph.as_ref().unwrap().size() < size {
+            buffers.major_graph = Some(render_device.create_buffer(&BufferDescriptor {
+                label: Some("major_graph_buffer"),
+                size: size.max(1024), // Minimum size
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
+        if let Some(buf) = &buffers.major_graph {
+            render_queue.write_buffer(buf, 0, bytemuck::cast_slice(&major_graph.rows));
+        }
+    } else if buffers.major_graph.is_none() {
+        // Create a dummy buffer if empty
+        buffers.major_graph = Some(render_device.create_buffer(&BufferDescriptor {
+            label: Some("major_graph_dummy"),
+            size: 1024,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+    }
+
     let param_bytes = bytemuck::bytes_of(&*params);
     if let Some(buf) = &buffers.params {
         render_queue.write_buffer(buf, 0, param_bytes);
@@ -254,6 +309,7 @@ fn prepare_path_buffers(
             buffers.paths.as_ref().unwrap().as_entire_binding(),
             buffers.params.as_ref().unwrap().as_entire_binding(),
             buffers.requests.as_ref().unwrap().as_entire_binding(),
+            buffers.major_graph.as_ref().unwrap().as_entire_binding(),
         )),
     );
     buffers.bind_group = Some(bg);
