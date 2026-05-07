@@ -41,7 +41,7 @@ pub struct WorldVisuals {
 struct ZoneMarker;
 
 #[derive(Component)]
-struct RoadMarker(pub u32);
+struct RoadMarker;
 
 #[derive(Component)]
 pub struct BuildingMarker(pub u32, pub u32); // (id, level)
