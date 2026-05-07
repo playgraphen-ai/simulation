@@ -261,10 +261,16 @@ fn sync_building_view(
         let id_u32 = id as u32;
         if seen.contains(&id_u32) || b.capacity == 0 { continue; }
         let elev = grid.elevations[grid.idx(b.tile.0, b.tile.1)];
+        let size = match b.btype {
+            ZoneType::Residential => 3.0,
+            _ => 4.0,
+        };
+        let offset = size / 2.0;
+
         commands.spawn((
             SceneRoot(scene_for(&vis, b.btype, b.level)),
-            Transform::from_xyz(b.tile.0 as f32 + 2.0, elev, b.tile.1 as f32 + 2.0)
-                .with_scale(Vec3::splat(4.0)),
+            Transform::from_xyz(b.tile.0 as f32 + offset, elev, b.tile.1 as f32 + offset)
+                .with_scale(Vec3::splat(size)),
             BuildingMarker(id_u32, b.level),
         ));
     }

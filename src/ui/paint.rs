@@ -7,7 +7,7 @@ use bevy::prelude::*;
 
 use crate::render::camera::CursorTile;
 use crate::sim::buildings::{spawn_building, BuildingData};
-use crate::sim::grid::{CityGrid, Tile};
+use crate::sim::grid::{CityGrid, Tile, ZoneType};
 use crate::sim::roads::RoadData;
 
 use super::tools::ActiveTool;
@@ -33,10 +33,16 @@ pub fn paint_tick_system(
         ActiveTool::None => {}
         ActiveTool::Zone(tag) => {
             if matches!(grid.get(x, y), Some(Tile::Empty)) {
+                let ztype = tag.as_zone();
+                let b_size = match ztype {
+                    ZoneType::Residential => 3,
+                    _ => 4,
+                };
+
                 // Only allow zoning if there is an adjacent road.
                 let mut adjacent_road = None;
-                'check: for dy in 0..4 {
-                    for dx in 0..4 {
+                'check: for dy in 0..b_size {
+                    for dx in 0..b_size {
                         let tx = x + dx;
                         let ty = y + dy;
                         if tx >= grid.width || ty >= grid.height { continue; }
@@ -51,7 +57,7 @@ pub fn paint_tick_system(
 
                 if let Some((seg_id, road_tile)) = adjacent_road {
                     let road_t = roads.get_tile_t(seg_id, road_tile);
-                    spawn_building(&mut buildings, &mut grid, (x, y), tag.as_zone(), seg_id, road_t);
+                    spawn_building(&mut buildings, &mut grid, (x, y), ztype, seg_id, road_t);
                     grid.set_changed();
                 }
             }
@@ -81,7 +87,7 @@ pub fn paint_tick_system(
                     }
                     
                     // Materialize adjacent zoned tiles as buildings.
-                    // We check a larger radius for 4x4 buildings now.
+                    // Check a radius large enough for 4x4.
                     for ox in -4..=4i32 {
                         for oy in -4..=4i32 {
                             let nx = tx as i32 + ox;

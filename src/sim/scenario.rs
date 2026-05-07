@@ -158,14 +158,21 @@ pub fn build_starter_scenario(
                 let bx = start_x + gx * block_size;
                 let by = start_y + gy * block_size;
 
-                for dy in (1..block_size).step_by(4) {
-                    for dx in (1..block_size).step_by(4) {
+                let step_size = 4; // Default try 4x4 spacing
+
+                for dy in (1..block_size).step_by(step_size) {
+                    for dx in (1..block_size).step_by(step_size) {
                         let tx = bx + dx;
                         let ty = by + dy;
                         
+                        let b_size = match zone {
+                            ZoneType::Residential => 3,
+                            _ => 4,
+                        };
+
                         let mut nearest_road = None;
-                        'outer: for oy in 0..4 {
-                            for ox in 0..4 {
+                        'outer: for oy in 0..b_size {
+                            for ox in 0..b_size {
                                 if tx + ox >= grid.width || ty + oy >= grid.height { continue; }
                                 for (nx, ny) in grid.neighbours4(tx + ox, ty + oy) {
                                     if let Some(Tile::Road(sid)) = grid.get(nx, ny) {
@@ -179,17 +186,6 @@ pub fn build_starter_scenario(
                         if let Some((seg_id, road_tile)) = nearest_road {
                             let road_t = roads.get_tile_t(seg_id, road_tile);
                             if let Some(bid) = spawn_building(&mut buildings, &mut grid, (tx, ty), zone, seg_id, road_t) {
-                                // Also zone the area so it looks right
-                                for oy in 0..4 {
-                                    for ox in 0..4 {
-                                        if grid.get(tx + ox, ty + oy) == Some(Tile::Building(bid)) {
-                                            // Tile::Building(bid) was set by spawn_building, 
-                                            // but we might want to keep it as Building for the grid state.
-                                            // Actually, if we want to see the zone color under it (if we had decals),
-                                            // we'd need something else. But Tile::Building is fine.
-                                        }
-                                    }
-                                }
                                 if first_building_id.is_none() {
                                     first_building_id = Some(bid);
                                 }

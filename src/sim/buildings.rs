@@ -89,9 +89,15 @@ impl BuildingData {
 
     pub fn refresh_row(&mut self, id: u32) {
         let b = &self.items[id as usize];
+        let size = match b.btype {
+            ZoneType::Residential => 3.0,
+            _ => 4.0,
+        };
+        let offset = size / 2.0;
+
         self.rows[id as usize] = BuildingRow {
-            x: b.tile.0 as f32 + 2.0, // Center of 4x4
-            y: b.tile.1 as f32 + 2.0, // Center of 4x4
+            x: b.tile.0 as f32 + offset,
+            y: b.tile.1 as f32 + offset,
             btype: match b.btype {
                 ZoneType::Residential => 0.0,
                 ZoneType::Office => 1.0,
@@ -113,9 +119,9 @@ impl BuildingData {
 /// Capacity by level: each upgrade roughly doubles capacity.
 fn capacity_for(btype: ZoneType, level: u32) -> u32 {
     let base = match btype {
-        ZoneType::Residential => 64, // 16x for 4x4
-        ZoneType::Office => 96,
-        ZoneType::Shop => 128,
+        ZoneType::Residential => 36, // 9x for 3x3
+        ZoneType::Office => 96,  // 16x for 4x4
+        ZoneType::Shop => 128,   // 16x for 4x4
     };
     base * (1 << level)
 }
@@ -123,15 +129,15 @@ fn capacity_for(btype: ZoneType, level: u32) -> u32 {
 /// Income/rent by level: higher levels yield more.
 fn income_for(btype: ZoneType, level: u32) -> f32 {
     let base = match btype {
-        ZoneType::Residential => 32.0,  // 16x for 4x4
-        ZoneType::Office => 80.0,
-        ZoneType::Shop => 48.0,
+        ZoneType::Residential => 18.0,  // 9x for 3x3
+        ZoneType::Office => 80.0,   // 16x for 4x4
+        ZoneType::Shop => 48.0,     // 16x for 4x4
     };
     base * (level as f32 + 1.0)
 }
 
 /// Public helper used by the road/zone construction systems to materialize a
-/// 4x4 building on a zoned area adjacent to a given road segment.
+/// building on a zoned area adjacent to a given road segment.
 pub fn spawn_building(
     data: &mut BuildingData,
     grid: &mut CityGrid,
@@ -140,9 +146,14 @@ pub fn spawn_building(
     road_seg: u32,
     road_t: f32,
 ) -> Option<u32> {
-    // Check if 4x4 area is clear and within bounds
-    for dy in 0..4 {
-        for dx in 0..4 {
+    let size = match btype {
+        ZoneType::Residential => 3,
+        _ => 4,
+    };
+
+    // Check if area is clear and within bounds
+    for dy in 0..size {
+        for dx in 0..size {
             let tx = tile.0 + dx;
             let ty = tile.1 + dy;
             if tx >= grid.width || ty >= grid.height { return None; }
@@ -167,8 +178,8 @@ pub fn spawn_building(
         age_seconds: 0.0,
     })?;
 
-    for dy in 0..4 {
-        for dx in 0..4 {
+    for dy in 0..size {
+        for dx in 0..size {
             grid.set(tile.0 + dx, tile.1 + dy, Tile::Building(id));
         }
     }
