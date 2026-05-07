@@ -263,7 +263,8 @@ fn sync_building_view(
         let elev = grid.elevations[grid.idx(b.tile.0, b.tile.1)];
         commands.spawn((
             SceneRoot(scene_for(&vis, b.btype, b.level)),
-            Transform::from_xyz(b.tile.0 as f32 + 0.5, elev, b.tile.1 as f32 + 0.5),
+            Transform::from_xyz(b.tile.0 as f32 + 2.0, elev, b.tile.1 as f32 + 2.0)
+                .with_scale(Vec3::splat(4.0)),
             BuildingMarker(id_u32, b.level),
         ));
     }

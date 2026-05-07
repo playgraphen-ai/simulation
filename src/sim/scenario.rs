@@ -158,27 +158,40 @@ pub fn build_starter_scenario(
                 let bx = start_x + gx * block_size;
                 let by = start_y + gy * block_size;
 
-                for dy in 1..block_size {
-                    for dx in 1..block_size {
+                for dy in (1..block_size).step_by(4) {
+                    for dx in (1..block_size).step_by(4) {
                         let tx = bx + dx;
                         let ty = by + dy;
                         
-                        if dx == 1 || dx == block_size - 1 || dy == 1 || dy == block_size - 1 {
-                            let mut nearest_road = None;
-                            for (nx, ny) in grid.neighbours4(tx, ty) {
-                                if let Some(Tile::Road(sid)) = grid.get(nx, ny) {
-                                    nearest_road = Some((sid, (nx, ny)));
-                                    break;
+                        let mut nearest_road = None;
+                        'outer: for oy in 0..4 {
+                            for ox in 0..4 {
+                                if tx + ox >= grid.width || ty + oy >= grid.height { continue; }
+                                for (nx, ny) in grid.neighbours4(tx + ox, ty + oy) {
+                                    if let Some(Tile::Road(sid)) = grid.get(nx, ny) {
+                                        nearest_road = Some((sid, (nx, ny)));
+                                        break 'outer;
+                                    }
                                 }
                             }
+                        }
 
-                            if let Some((seg_id, road_tile)) = nearest_road {
-                                grid.set(tx, ty, Tile::Zone(zone));
-                                let road_t = roads.get_tile_t(seg_id, road_tile);
-                                if let Some(bid) = spawn_building(&mut buildings, &mut grid, (tx, ty), zone, seg_id, road_t) {
-                                    if first_building_id.is_none() {
-                                        first_building_id = Some(bid);
+                        if let Some((seg_id, road_tile)) = nearest_road {
+                            let road_t = roads.get_tile_t(seg_id, road_tile);
+                            if let Some(bid) = spawn_building(&mut buildings, &mut grid, (tx, ty), zone, seg_id, road_t) {
+                                // Also zone the area so it looks right
+                                for oy in 0..4 {
+                                    for ox in 0..4 {
+                                        if grid.get(tx + ox, ty + oy) == Some(Tile::Building(bid)) {
+                                            // Tile::Building(bid) was set by spawn_building, 
+                                            // but we might want to keep it as Building for the grid state.
+                                            // Actually, if we want to see the zone color under it (if we had decals),
+                                            // we'd need something else. But Tile::Building is fine.
+                                        }
                                     }
+                                }
+                                if first_building_id.is_none() {
+                                    first_building_id = Some(bid);
                                 }
                             }
                         }

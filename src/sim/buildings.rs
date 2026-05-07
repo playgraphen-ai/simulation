@@ -90,8 +90,8 @@ impl BuildingData {
     pub fn refresh_row(&mut self, id: u32) {
         let b = &self.items[id as usize];
         self.rows[id as usize] = BuildingRow {
-            x: b.tile.0 as f32,
-            y: b.tile.1 as f32,
+            x: b.tile.0 as f32 + 2.0, // Center of 4x4
+            y: b.tile.1 as f32 + 2.0, // Center of 4x4
             btype: match b.btype {
                 ZoneType::Residential => 0.0,
                 ZoneType::Office => 1.0,
@@ -113,9 +113,9 @@ impl BuildingData {
 /// Capacity by level: each upgrade roughly doubles capacity.
 fn capacity_for(btype: ZoneType, level: u32) -> u32 {
     let base = match btype {
-        ZoneType::Residential => 4,
-        ZoneType::Office => 6,
-        ZoneType::Shop => 8,
+        ZoneType::Residential => 64, // 16x for 4x4
+        ZoneType::Office => 96,
+        ZoneType::Shop => 128,
     };
     base * (1 << level)
 }
@@ -123,15 +123,15 @@ fn capacity_for(btype: ZoneType, level: u32) -> u32 {
 /// Income/rent by level: higher levels yield more.
 fn income_for(btype: ZoneType, level: u32) -> f32 {
     let base = match btype {
-        ZoneType::Residential => 2.0,  // rent collected from occupants
-        ZoneType::Office => 5.0,
-        ZoneType::Shop => 3.0,
+        ZoneType::Residential => 32.0,  // 16x for 4x4
+        ZoneType::Office => 80.0,
+        ZoneType::Shop => 48.0,
     };
     base * (level as f32 + 1.0)
 }
 
 /// Public helper used by the road/zone construction systems to materialize a
-/// level-0 building on a zoned tile adjacent to a given road segment.
+/// 4x4 building on a zoned area adjacent to a given road segment.
 pub fn spawn_building(
     data: &mut BuildingData,
     grid: &mut CityGrid,
@@ -140,6 +140,19 @@ pub fn spawn_building(
     road_seg: u32,
     road_t: f32,
 ) -> Option<u32> {
+    // Check if 4x4 area is clear and within bounds
+    for dy in 0..4 {
+        for dx in 0..4 {
+            let tx = tile.0 + dx;
+            let ty = tile.1 + dy;
+            if tx >= grid.width || ty >= grid.height { return None; }
+            match grid.get(tx, ty) {
+                Some(Tile::Empty) | Some(Tile::Zone(_)) => {},
+                _ => return None, // Already something here
+            }
+        }
+    }
+
     let level = 0;
     let id = data.push(Building {
         tile,
@@ -153,6 +166,11 @@ pub fn spawn_building(
         growth: 0.0,
         age_seconds: 0.0,
     })?;
-    grid.set(tile.0, tile.1, Tile::Building(id));
+
+    for dy in 0..4 {
+        for dx in 0..4 {
+            grid.set(tile.0 + dx, tile.1 + dy, Tile::Building(id));
+        }
+    }
     Some(id)
 }
