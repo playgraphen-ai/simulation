@@ -35,10 +35,60 @@ struct PathRequestQueue {
 };
 
 @group(0) @binding(0) var roads_tex  : texture_storage_2d<rgba32float, read>;
-@group(0) @binding(1) var<storage, read_write> prev: array<i32>;
+@group(0) @binding(1) var<storage, read_write> prev: array<atomic<u32>>;
 @group(0) @binding(2) var<storage, read_write> paths: array<u32>;
 @group(0) @binding(3) var<uniform> params: PathParams;
 @group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
+
+fn get_prev(base_prev: u32, idx: u32) -> i32 {
+    let word_idx = base_prev + (idx / 2u);
+    let shift = (idx % 2u) * 16u;
+    let word = atomicLoad(&prev[word_idx]);
+    let val = (word >> shift) & 0xFFFFu;
+    if val == 0xFFFFu {
+        return -1;
+    }
+    return i32(val);
+}
+
+fn set_prev_if_empty(base_prev: u32, idx: u32, val: u32) -> bool {
+    let word_idx = base_prev + (idx / 2u);
+    let shift = (idx % 2u) * 16u;
+    let mask = ~(0xFFFFu << shift);
+    let new_val_shifted = (val & 0xFFFFu) << shift;
+
+    var expected = atomicLoad(&prev[word_idx]);
+    loop {
+        let current_val = (expected >> shift) & 0xFFFFu;
+        if current_val != 0xFFFFu {
+            return false; // Already set
+        }
+        let desired = (expected & mask) | new_val_shifted;
+        let result = atomicCompareExchangeWeak(&prev[word_idx], expected, desired);
+        if result.exchanged {
+            return true;
+        }
+        expected = result.old_value;
+    }
+    return false;
+}
+
+fn init_prev(base_prev: u32, idx: u32, val: u32) {
+    let word_idx = base_prev + (idx / 2u);
+    let shift = (idx % 2u) * 16u;
+    let mask = ~(0xFFFFu << shift);
+    let new_val_shifted = (val & 0xFFFFu) << shift;
+
+    var expected = atomicLoad(&prev[word_idx]);
+    loop {
+        let desired = (expected & mask) | new_val_shifted;
+        let result = atomicCompareExchangeWeak(&prev[word_idx], expected, desired);
+        if result.exchanged {
+            break;
+        }
+        expected = result.old_value;
+    }
+}
 
 fn seg_coords(seg: u32) -> array<vec2<i32>, 5> {
     let base = seg * 5u;
@@ -87,7 +137,7 @@ fn main(
     var init_idx = lidx;
     while init_idx < slice {
         if is_valid_req {
-            prev[base_prev + init_idx] = -1;
+            init_prev(base_prev, init_idx, 0xFFFFu);
         }
         init_idx = init_idx + 64u;
     }
@@ -102,7 +152,7 @@ fn main(
                 atomicStore(&found, 0u);
             }
             frontier[0] = req.start;
-            prev[base_prev + req.start] = i32(req.start);
+            init_prev(base_prev, req.start, req.start);
         }
     }
     workgroupBarrier();
@@ -141,8 +191,7 @@ fn main(
                     
                     if nb >= params.segments_count { continue; }
 
-                    if prev[base_prev + nb] < 0 {
-                        prev[base_prev + nb] = i32(cur);
+                    if set_prev_if_empty(base_prev, nb, cur) {
                         if nb == req.target_seg {
                             atomicStore(&found, 1u);
                         }
@@ -194,7 +243,7 @@ fn main(
             while count < params.max_path_len {
                 path_tmp[count] = cur;
                 count = count + 1u;
-                let p = prev[base_prev + cur];
+                let p = get_prev(base_prev, cur);
                 if p < 0 || u32(p) == cur { break; }
                 cur = u32(p);
             }

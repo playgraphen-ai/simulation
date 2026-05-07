@@ -221,8 +221,8 @@ fn prepare_path_buffers(
         }
     }
 
-    let max_prev_size = 536870912u64; // 512MB
-    let prev_size = (max_reqs as u64 * 8192u64 * 4).max(4).min(max_prev_size);
+    let max_prev_size = 268435456u64; // 256MB
+    let prev_size = (max_reqs as u64 * 8192u64 * 2).max(4).min(max_prev_size);
     if buffers.prev.is_none() || buffers.prev.as_ref().unwrap().size() < prev_size {
         buffers.prev = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("path_prev_buffer"),
