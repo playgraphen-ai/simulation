@@ -38,6 +38,10 @@ struct SimParams {
     cycle_frames: u32,
     do_readback: u32,
     reset_stats: u32,
+    grid_w: u32,
+    grid_h: u32,
+    entry_seg: u32,
+    collisions_enabled: f32,
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
@@ -47,6 +51,7 @@ struct PathRequest {
     start: u32,
     target_seg: u32,
     person_id: u32,
+    pad: u32,
 };
 
 struct PathRequestQueue {
@@ -106,14 +111,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     
     let estimated_cars = f32(total_cars) / f32(params.cycle_frames);
 
-    let max_cars_on_segment = 20.0;
-    
-    // Factor: 1.0 = empty (full speed), 0.1 = completely jammed.
-    let congestion_factor = max(0.1, 1.0 - (estimated_cars / max_cars_on_segment));
-
     // Load current speed data
     let coords = road_coords(seg_id);
     var tex1 = textureLoad(roads_tex, coords[1]);
+    let seg_len = max(1.0, tex1.w);
+    
+    let r_tex4 = textureLoad(roads_tex, coords[4]);
+    let road_type = r_tex4.x;
+    
+    // Capacity depends on length and lanes (1 lane for Normal, 2 for Highway)
+    let lanes = select(1.0, 2.0, road_type == 1.0);
+    let capacity = max(1.0, seg_len * lanes * 1.2); // 1.2 cars per unit per lane for saturation
+    
+    // Factor: 1.0 = empty (full speed), 0.1 = completely jammed.
+    let congestion_factor = max(0.1, 1.0 - (estimated_cars / capacity));
     
     // EMA (Exponential Moving Average) for smoothing: 50% old, 50% new
     // Since it only runs once every cycle (e.g. 90 frames), we weight the new reading much more.
