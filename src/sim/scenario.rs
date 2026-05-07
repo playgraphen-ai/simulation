@@ -39,13 +39,16 @@ pub fn build_starter_scenario(
     let grid_size_x = settings.grid_x;
     let grid_size_y = settings.grid_y;
     
-    // Define 4 distant origin points for the 4 cities, now 3x closer (200 apart instead of 600)
-    let offsets: [(u32, u32); 4] = [
-        (200, 200),
-        (200, 400),
-        (400, 200),
-        (400, 400),
-    ];
+    // Define 16 distant origin points for the 16 cities, spaced 100 units apart (half of previous 200)
+    let mut offsets = Vec::new();
+    let spacing = 100;
+    let base_x = 100;
+    let base_y = 100;
+    for cy in 0..4 {
+        for cx in 0..4 {
+            offsets.push((base_x + cx * spacing, base_y + cy * spacing));
+        }
+    }
 
     let mut first_building_id = None;
     let mid_gy = grid_size_y / 2;
@@ -95,37 +98,38 @@ pub fn build_starter_scenario(
         }
     }
 
-    // Connect the 4 cities with single roads
-    let c0_mid_y = offsets[0].1 + mid_gy * block_size;
-    let c1_mid_y = offsets[1].1 + mid_gy * block_size;
-    let c0_end_x = offsets[0].0 + grid_size_x * block_size;
-    let c2_start_x = offsets[2].0;
-    
-    // Connect top-left (0) to top-right (2)
-    for x in c0_end_x..=c2_start_x {
-        roads.push_link((x, c0_mid_y), (x.saturating_sub(1).max(c0_end_x), c0_mid_y));
-    }
-    // Connect bottom-left (1) to bottom-right (3)
-    let c1_end_x = offsets[1].0 + grid_size_x * block_size;
-    let c3_start_x = offsets[3].0;
-    for x in c1_end_x..=c3_start_x {
-        roads.push_link((x, c1_mid_y), (x.saturating_sub(1).max(c1_end_x), c1_mid_y));
-    }
-    
-    // Connect top-left (0) to bottom-left (1)
-    let c0_mid_x = offsets[0].0 + (grid_size_x / 2) * block_size;
-    let c0_end_y = offsets[0].1 + grid_size_y * block_size;
-    let c1_start_y = offsets[1].1;
-    for y in c0_end_y..=c1_start_y {
-        roads.push_link((c0_mid_x, y), (c0_mid_x, y.saturating_sub(1).max(c0_end_y)));
-    }
-    
-    // Connect top-right (2) to bottom-right (3)
-    let c2_mid_x = offsets[2].0 + (grid_size_x / 2) * block_size;
-    let c2_end_y = offsets[2].1 + grid_size_y * block_size;
-    let c3_start_y = offsets[3].1;
-    for y in c2_end_y..=c3_start_y {
-        roads.push_link((c2_mid_x, y), (c2_mid_x, y.saturating_sub(1).max(c2_end_y)));
+    // Connect the 16 cities with single roads
+    for cy in 0..4 {
+        for cx in 0..4 {
+            let idx = (cy * 4 + cx) as usize;
+            let current = offsets[idx];
+            let city_w = grid_size_x * block_size;
+            let city_h = grid_size_y * block_size;
+            let mid_ox = (grid_size_x / 2) * block_size;
+            let mid_oy = mid_gy * block_size;
+
+            // Connect right (if cx < 3)
+            if cx < 3 {
+                let right = offsets[idx + 1];
+                let x_start = current.0 + city_w;
+                let x_end = right.0;
+                let y = current.1 + mid_oy;
+                for x in x_start..=x_end {
+                    roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y));
+                }
+            }
+
+            // Connect down (if cy < 3)
+            if cy < 3 {
+                let down = offsets[idx + 4];
+                let y_start = current.1 + city_h;
+                let y_end = down.1;
+                let x = current.0 + mid_ox;
+                for y in y_start..=y_end {
+                    roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)));
+                }
+            }
+        }
     }
 
     let tile_to_seg = roads.rebuild_topology();
@@ -208,7 +212,7 @@ pub fn build_starter_scenario(
     spawn_ev.write(SpawnPeopleRequest { count: settings.population });
 
     info!(
-        "4 cities built, each {}x{} blocks, connected. {} people spawned.",
+        "16 cities built, each {}x{} blocks, connected. {} people spawned.",
         grid_size_x, grid_size_y, settings.population
     );
 }
