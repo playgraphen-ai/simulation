@@ -184,7 +184,7 @@ fn prepare_path_buffers(
     gpu_sim_textures: Res<crate::compute::gpu_sim::GpuSimTextures>,
     mut buffers: ResMut<GpuPathBuffers>,
 ) {
-    let max_reqs = 16384u32;
+    let max_reqs = 65536u32;
     buffers.max_requests = max_reqs;
 
     // IMPORTANT: Sync max_path_len to match shader's 256.

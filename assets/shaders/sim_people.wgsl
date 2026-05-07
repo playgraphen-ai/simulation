@@ -491,7 +491,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             // --- QUEUE INITIAL PATH REQUEST ---
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
-            let max_queue = 16384u;
+            let max_queue = 65536u;
             if req_idx < max_queue {
                 path_queue.requests[req_idx] = PathRequest(u32(start_seg), target_seg, pid, 0u);
             }
@@ -591,7 +591,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             // Queue path request
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
-            let max_queue = 16384u;
+            let max_queue = 65536u;
             if req_idx < max_queue {
                 path_queue.requests[req_idx] = PathRequest(start_seg, target_seg, pid, 0u);
             }

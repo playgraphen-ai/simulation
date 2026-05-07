@@ -39,13 +39,13 @@ pub fn build_starter_scenario(
     let grid_size_x = settings.grid_x;
     let grid_size_y = settings.grid_y;
     
-    // Define 16 distant origin points for the 16 cities, spaced 100 units apart (half of previous 200)
+    // Define 64 distant origin points for the 64 cities, spaced 100 units apart
     let mut offsets = Vec::new();
     let spacing = 100;
     let base_x = 100;
     let base_y = 100;
-    for cy in 0..4 {
-        for cx in 0..4 {
+    for cy in 0..8 {
+        for cx in 0..8 {
             offsets.push((base_x + cx * spacing, base_y + cy * spacing));
         }
     }
@@ -98,18 +98,18 @@ pub fn build_starter_scenario(
         }
     }
 
-    // Connect the 16 cities with single roads
-    for cy in 0..4 {
-        for cx in 0..4 {
-            let idx = (cy * 4 + cx) as usize;
+    // Connect the 64 cities with single roads
+    for cy in 0..8 {
+        for cx in 0..8 {
+            let idx = (cy * 8 + cx) as usize;
             let current = offsets[idx];
             let city_w = grid_size_x * block_size;
             let city_h = grid_size_y * block_size;
             let mid_ox = (grid_size_x / 2) * block_size;
             let mid_oy = mid_gy * block_size;
 
-            // Connect right (if cx < 3)
-            if cx < 3 {
+            // Connect right (if cx < 7)
+            if cx < 7 {
                 let right = offsets[idx + 1];
                 let x_start = current.0 + city_w;
                 let x_end = right.0;
@@ -119,9 +119,9 @@ pub fn build_starter_scenario(
                 }
             }
 
-            // Connect down (if cy < 3)
-            if cy < 3 {
-                let down = offsets[idx + 4];
+            // Connect down (if cy < 7)
+            if cy < 7 {
+                let down = offsets[idx + 8];
                 let y_start = current.1 + city_h;
                 let y_end = down.1;
                 let x = current.0 + mid_ox;
@@ -147,7 +147,7 @@ pub fn build_starter_scenario(
 
     commands.insert_resource(ScenarioLayout { entry_seg });
 
-    // 2. Zone the blocks for all 4 cities
+    // 2. Zone the blocks for all cities
     for &(start_x, start_y) in &offsets {
         for gy in 0..grid_size_y {
             for gx in 0..grid_size_x {
@@ -212,7 +212,7 @@ pub fn build_starter_scenario(
     spawn_ev.write(SpawnPeopleRequest { count: settings.population });
 
     info!(
-        "16 cities built, each {}x{} blocks, connected. {} people spawned.",
+        "64 cities built, each {}x{} blocks, connected. {} people spawned.",
         grid_size_x, grid_size_y, settings.population
     );
 }
