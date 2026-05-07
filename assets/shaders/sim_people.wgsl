@@ -204,10 +204,10 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
     var prev_seg = texel2.y;
 
     if activity == ACT_TRAVEL {
-        let base_idx = pid * 256u;
+        let base_idx = pid * 512u;
         let current_step = u32(path_cursor);
         
-        let max_paths = 16777216u; // 65536 * 256
+        let max_paths = 33554432u; // 65536 * 512
         if base_idx + current_step >= max_paths {
             return;
         }
@@ -522,7 +522,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             if req_idx < max_queue {
                 path_queue.requests[req_idx] = PathRequest(u32(start_seg), target_seg, pid, 0u);
             }
-            person_paths[pid * 256u] = 0xFFFFFFFFu;
+            person_paths[pid * 512u] = 0xFFFFFFFFu;
             
             textureStore(people_tex, coords[0], texel0);
             textureStore(people_tex, coords[1], texel1);
@@ -624,8 +624,8 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
 
             // Reset path buffer for this person
-            let path_idx = pid * 256u;
-            if path_idx < 16777216u { // 65536 * 256 = 16777216
+            let path_idx = pid * 512u;
+            if path_idx < 33554432u { // 65536 * 512 = 33554432
                 person_paths[path_idx] = 0xFFFFFFFFu;
             }
 

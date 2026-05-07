@@ -1,12 +1,5 @@
-// Compute shader: batched segment-level BFS pathfinding.
+// Compute shader: batched segment-level A* pathfinding with fixed memory window.
 // Each person needing a path is assigned to one workgroup.
-//
-// Bindings:
-//   @group(0) @binding(0) var roads_tex  : texture_storage_2d<rgba32float, read>;
-//   @group(0) @binding(1) var<storage, read_write> prev: array<i32>;
-//   @group(0) @binding(2) var<storage, read_write> paths: array<u32>;  // MAX_PATH_LEN per request
-//   @group(0) @binding(3) var<uniform> params: PathParams;
-//   @group(0) @binding(4) var<storage, read> requests: array<PathRequest>;
 
 struct PathParams {
     segments_count: u32,
@@ -35,59 +28,50 @@ struct PathRequestQueue {
 };
 
 @group(0) @binding(0) var roads_tex  : texture_storage_2d<rgba32float, read>;
-@group(0) @binding(1) var<storage, read_write> prev: array<atomic<u32>>;
+@group(0) @binding(1) var<storage, read_write> prev: array<atomic<u32>>; // Hash Table: 512 entries per request
 @group(0) @binding(2) var<storage, read_write> paths: array<u32>;
 @group(0) @binding(3) var<uniform> params: PathParams;
 @group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
 
-fn get_prev(base_prev: u32, idx: u32) -> i32 {
-    let word_idx = base_prev + (idx / 2u);
-    let shift = (idx % 2u) * 16u;
-    let word = atomicLoad(&prev[word_idx]);
-    let val = (word >> shift) & 0xFFFFu;
-    if val == 0xFFFFu {
-        return -1;
-    }
-    return i32(val);
+fn hash_u32(x: u32) -> u32 {
+    var v = x;
+    v = ((v >> 16u) ^ v) * 0x45d9f3bu;
+    v = ((v >> 16u) ^ v) * 0x45d9f3bu;
+    v = (v >> 16u) ^ v;
+    return v;
 }
 
-fn set_prev_if_empty(base_prev: u32, idx: u32, val: u32) -> bool {
-    let word_idx = base_prev + (idx / 2u);
-    let shift = (idx % 2u) * 16u;
-    let mask = ~(0xFFFFu << shift);
-    let new_val_shifted = (val & 0xFFFFu) << shift;
-
-    var expected = atomicLoad(&prev[word_idx]);
-    loop {
-        let current_val = (expected >> shift) & 0xFFFFu;
-        if current_val != 0xFFFFu {
-            return false; // Already set
-        }
-        let desired = (expected & mask) | new_val_shifted;
-        let result = atomicCompareExchangeWeak(&prev[word_idx], expected, desired);
-        if result.exchanged {
+fn set_prev_ht(base: u32, key: u32, val: u32) -> bool {
+    let k16 = key & 0xFFFFu;
+    let v16 = val & 0xFFFFu;
+    let new_entry = (k16 << 16u) | v16;
+    
+    var h = hash_u32(key) % 512u;
+    for (var i: u32 = 0u; i < 64u; i = i + 1u) { 
+        let slot = base + ((h + i) % 512u);
+        let res = atomicCompareExchangeWeak(&prev[slot], 0xFFFFFFFFu, new_entry);
+        if res.exchanged {
             return true;
         }
-        expected = result.old_value;
+        if (res.old_value >> 16u) == k16 {
+            return false; // Already exists
+        }
     }
-    return false;
+    return false; // Table full or collision limit
 }
 
-fn init_prev(base_prev: u32, idx: u32, val: u32) {
-    let word_idx = base_prev + (idx / 2u);
-    let shift = (idx % 2u) * 16u;
-    let mask = ~(0xFFFFu << shift);
-    let new_val_shifted = (val & 0xFFFFu) << shift;
-
-    var expected = atomicLoad(&prev[word_idx]);
-    loop {
-        let desired = (expected & mask) | new_val_shifted;
-        let result = atomicCompareExchangeWeak(&prev[word_idx], expected, desired);
-        if result.exchanged {
-            break;
+fn get_prev_ht(base: u32, key: u32) -> i32 {
+    let k16 = key & 0xFFFFu;
+    var h = hash_u32(key) % 512u;
+    for (var i: u32 = 0u; i < 64u; i = i + 1u) {
+        let slot = base + ((h + i) % 512u);
+        let entry = atomicLoad(&prev[slot]);
+        if entry == 0xFFFFFFFFu { return -1; }
+        if (entry >> 16u) == k16 {
+            return i32(entry & 0xFFFFu);
         }
-        expected = result.old_value;
     }
+    return -1;
 }
 
 fn seg_coords(seg: u32) -> array<vec2<i32>, 5> {
@@ -110,6 +94,9 @@ var<workgroup> next_len: atomic<u32>;
 var<workgroup> found: atomic<u32>;
 var<workgroup> shared_v: u32;
 var<workgroup> shared_req_id: u32;
+
+var<workgroup> best_seg: u32;
+var<workgroup> min_h: f32;
 
 fn pack_f(f: f32, id: u32) -> u32 {
     let f_u = u32(clamp(f * 100.0, 0.0, 524287.0));
@@ -154,7 +141,7 @@ fn main(
     }
     workgroupBarrier();
     let req_id = shared_req_id;
-    let max_req = min(atomicLoad(&path_queue.count_x), 16384u);
+    let max_req = min(atomicLoad(&path_queue.count_x), 65536u);
 
     let is_valid_req = req_id < max_req;
     var req: PathRequest;
@@ -162,15 +149,14 @@ fn main(
         req = path_queue.requests[req_id];
     }
 
-    let slice = params.segments_count;
-    let safe_req_id = min(req_id, 16383u);
-    let base_prev = safe_req_id * slice;
+    // Each request has exactly 512 entries in prev.
+    let base_prev = req_id * 512u;
 
-    // Initialize prev to -1 for this request's segments.
+    // Initialize only our window of 512 entries.
     var init_idx = lidx;
-    while init_idx < slice {
+    while init_idx < 512u {
         if is_valid_req {
-            init_prev(base_prev, init_idx, 0xFFFFu);
+            atomicStore(&prev[base_prev + init_idx], 0xFFFFFFFFu);
         }
         init_idx = init_idx + 64u;
     }
@@ -192,9 +178,13 @@ fn main(
             let start_coords = seg_coords(req.start);
             let start_t0 = textureLoad(roads_tex, start_coords[0]);
             let h = distance(start_t0.xy, target_pos);
+            
+            best_seg = req.start;
+            min_h = h;
+
             open_data[0] = pack_f(h, req.start);
             open_g[0] = 0.0;
-            init_prev(base_prev, req.start, req.start);
+            set_prev_ht(base_prev, req.start, req.start);
         } else {
             open_data[0] = 0xFFFFFFFFu;
         }
@@ -204,7 +194,8 @@ fn main(
     }
     workgroupBarrier();
 
-    // A* iterations.
+    // A* iterations. Window is 512, but we can iterate more if neighbors overlap.
+    // However, set_prev_ht will fail once the table is full (512 unique nodes).
     for (var step: u32 = 0u; step < params.max_path_len; step = step + 1u) {
         sort_open(lidx);
 
@@ -249,17 +240,19 @@ fn main(
 
                 if nb >= params.segments_count { continue; }
 
-                if set_prev_if_empty(base_prev, nb, cur) {
+                if set_prev_ht(base_prev, nb, cur) {
+                    let nb_coords = seg_coords(nb);
+                    let nb_t0 = textureLoad(roads_tex, nb_coords[0]);
+                    let nb_t1 = textureLoad(roads_tex, nb_coords[1]);
+                    
+                    let nb_h = distance(nb_t0.xy, target_pos);
+                    
                     if nb == req.target_seg {
                         atomicStore(&found, 1u);
                     }
 
-                    let nb_coords = seg_coords(nb);
-                    let nb_t0 = textureLoad(roads_tex, nb_coords[0]);
-                    let nb_t1 = textureLoad(roads_tex, nb_coords[1]);
                     let nb_cost = nb_t1.w / max(0.1, nb_t1.x);
                     let nb_g = cur_g + nb_cost;
-                    let nb_h = distance(nb_t0.xy, target_pos);
                     let nb_f = nb_g + nb_h;
 
                     let slot = atomicAdd(&next_len, 1u);
@@ -267,6 +260,23 @@ fn main(
                         next_data[slot] = pack_f(nb_f, nb);
                         next_g[slot] = nb_g;
                     }
+                }
+            }
+        }
+        workgroupBarrier();
+
+        // Update best_seg if any new node is closer.
+        // We do this by having lidx 0 scan the newly added nodes in next_data.
+        if lidx == 0u && is_valid_req {
+            let nlen = min(atomicLoad(&next_len), 1024u);
+            for (var i: u32 = 0u; i < nlen; i = i + 1u) {
+                let id = unpack_id(next_data[i]);
+                let nb_coords = seg_coords(id);
+                let nb_t0 = textureLoad(roads_tex, nb_coords[0]);
+                let h = distance(nb_t0.xy, target_pos);
+                if h < min_h {
+                    min_h = h;
+                    best_seg = id;
                 }
             }
         }
@@ -302,32 +312,28 @@ fn main(
         workgroupBarrier();
     }
 
-    // Reconstruct path.
+    // Reconstruct path from best_seg.
     if lidx == 0u && is_valid_req {
         let safe_person_id = min(req.person_id, 65535u);
         let base_path = safe_person_id * params.max_path_len;
 
-        if atomicLoad(&found) == 1u {
-            var cur = req.target_seg;
-            var path_tmp: array<u32, 256>;
-            var count: u32 = 0u;
+        var cur = best_seg;
+        var path_tmp: array<u32, 512>;
+        var count: u32 = 0u;
 
-            while count < params.max_path_len {
-                path_tmp[count] = cur;
-                count = count + 1u;
-                let p = get_prev(base_prev, cur);
-                if p < 0 || u32(p) == cur { break; }
-                cur = u32(p);
-            }
+        while count < params.max_path_len {
+            path_tmp[count] = cur;
+            count = count + 1u;
+            let p = get_prev_ht(base_prev, cur);
+            if p < 0 || u32(p) == cur { break; }
+            cur = u32(p);
+        }
 
-            for (var k: u32 = 0u; k < count; k = k + 1u) {
-                paths[base_path + k] = path_tmp[count - 1u - k];
-            }
-            for (var k: u32 = count; k < params.max_path_len; k = k + 1u) {
-                paths[base_path + k] = 0xFFFFFFFFu;
-            }
-        } else {
-             paths[base_path] = 0xFFFFFFFFu;
+        for (var k: u32 = 0u; k < count; k = k + 1u) {
+            paths[base_path + k] = path_tmp[count - 1u - k];
+        }
+        for (var k: u32 = count; k < params.max_path_len; k = k + 1u) {
+            paths[base_path + k] = 0xFFFFFFFFu;
         }
     }
 }

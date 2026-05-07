@@ -187,11 +187,11 @@ fn prepare_path_buffers(
     let max_reqs = 65536u32;
     buffers.max_requests = max_reqs;
 
-    // IMPORTANT: Sync max_path_len to match shader's 256.
-    params.max_path_len = 256;
+    // IMPORTANT: Sync max_path_len to match the search window.
+    params.max_path_len = 512;
 
     let people_capacity = 65536u64; // Max people
-    let paths_size = people_capacity * 256u64 * 4u64; // 256 max path len * 4 bytes per id
+    let paths_size = people_capacity * 512u64 * 4u64; // 512 max path len * 4 bytes per id
     if buffers.paths.is_none() {
         let initial_data = vec![0xFFu8; paths_size as usize];
         buffers.paths = Some(render_device.create_buffer_with_data(&BufferInitDescriptor {
@@ -221,9 +221,9 @@ fn prepare_path_buffers(
         }
     }
 
-    let max_prev_size = 268435456u64; // 256MB
-    let prev_size = (max_reqs as u64 * 8192u64 * 2).max(4).min(max_prev_size);
-    if buffers.prev.is_none() || buffers.prev.as_ref().unwrap().size() < prev_size {
+    // Fixed size: 65536 requests * 512 entries * 4 bytes per entry (u16 key, u16 val) = 128MB
+    let prev_size = max_reqs as u64 * 512u64 * 4u64;
+    if buffers.prev.is_none() || buffers.prev.as_ref().unwrap().size() != prev_size {
         buffers.prev = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("path_prev_buffer"),
             size: prev_size, 
