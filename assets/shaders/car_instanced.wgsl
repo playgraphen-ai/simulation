@@ -10,8 +10,9 @@ struct CarMaterialParams {
 @group(3) @binding(0) var people_tex: texture_2d<f32>;
 @group(3) @binding(1) var roads_tex: texture_2d<f32>;
 @group(3) @binding(2) var elevations_tex: texture_2d<f32>;
-@group(3) @binding(3) var<uniform> params: CarMaterialParams;
-@group(3) @binding(4) var road_points_tex: texture_2d<f32>;
+@group(3) @binding(3) var elevations_sampler: sampler;
+@group(3) @binding(4) var<uniform> params: CarMaterialParams;
+@group(3) @binding(5) var road_points_tex: texture_2d<f32>;
 
 struct Vertex {
     @location(0) position: vec3<f32>,
@@ -117,9 +118,17 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         let x = mix(p0.x, p1.x, f) + 0.5;
         let z = mix(p0.y, p1.y, f) + 0.5;
 
-        let el_a = textureLoad(elevations_tex, vec2<i32>(i32(p0.x), i32(p0.y)), 0).x;
-        let el_b = textureLoad(elevations_tex, vec2<i32>(i32(p1.x), i32(p1.y)), 0).x;
-        let y = mix(el_a, el_b, f) + 0.15;
+        // Texture pixel centers in WGPU are at (0.5, 0.5)
+        // Terrain vertices are at exact integers (0, 1, 2...)
+        // To sample the exact height at vertex `p0.x`, UV must be (p0.x + 0.5) / grid_w
+        let el_a = textureSampleLevel(elevations_tex, elevations_sampler, vec2<f32>(p0.x + 0.5, p0.y + 0.5) / f32(params.grid_w), 0.0).x;
+        let el_b = textureSampleLevel(elevations_tex, elevations_sampler, vec2<f32>(p1.x + 0.5, p1.y + 0.5) / f32(params.grid_w), 0.0).x;
+        
+        // Similarly, for smooth bilinear interpolation of any world point (x, z) 
+        // to match the terrain mesh, we must offset by +0.5
+        let uv = vec2<f32>(x + 0.5, z + 0.5) / f32(params.grid_w);
+        let terrain_h = textureSampleLevel(elevations_tex, elevations_sampler, uv, 0.0).x;
+        let y = terrain_h + 0.15; // 0.15 height offset for cars
 
         world_pos = vec3<f32>(x, y, z);
 

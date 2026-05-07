@@ -37,10 +37,11 @@ pub struct CarInstancedMaterial {
     #[texture(1, dimension = "2d")]
     pub roads_tex: Handle<Image>,
     #[texture(2, dimension = "2d")]
+    #[sampler(3)]
     pub elevations_tex: Handle<Image>,
-    #[uniform(3)]
+    #[uniform(4)]
     pub params: CarMaterialParams,
-    #[texture(4, dimension = "2d")]
+    #[texture(5, dimension = "2d")]
     pub road_points: Handle<Image>,
 }
 
@@ -143,5 +144,5 @@ fn setup_cars(
         ));
 
         setup.0 = true;
-    }
-}
+        }
+        }

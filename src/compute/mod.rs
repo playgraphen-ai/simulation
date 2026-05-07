@@ -178,6 +178,7 @@ fn sync_gpu_textures_and_params(
         gpu_tex.roads = Some(dt.roads.clone());
         gpu_tex.buildings = Some(dt.buildings.clone());
         gpu_tex.road_points = Some(dt.road_points.clone());
+        gpu_tex.elevations = Some(dt.elevations.clone());
     }
     let entry_seg = scenario.map(|s| s.entry_seg).unwrap_or(0);
     gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &grid, &mut gpu_params, entry_seg);

@@ -263,6 +263,7 @@ pub struct GpuSimTextures {
     pub roads: Option<Handle<Image>>,
     pub buildings: Option<Handle<Image>>,
     pub road_points: Option<Handle<Image>>,
+    pub elevations: Option<Handle<Image>>,
 }
 
 #[repr(C)]
