@@ -183,19 +183,22 @@ pub fn build_starter_scenario(
                 let bx = start_x + gx * block_size;
                 let by = start_y + gy * block_size;
 
-                let step_size = 4; // Default try 4x4 spacing
-
-                for dy in (1..block_size).step_by(step_size) {
-                    for dx in (1..block_size).step_by(step_size) {
+                let b_size = match zone {
+                    ZoneType::Residential => 3,
+                    _ => 4,
+                };
+                
+                // Start a bit inside the block to avoid the road's footprint (0..1 for normal roads)
+                // Normal roads occupy +0, +1. Highways occupy -1, +0, +1, +2.
+                // Since cities use Normal roads internally, we can start at offset 2 and go up to block_size - b_size.
+                let mut placed_any = false;
+                for dy in 2..=(block_size.saturating_sub(b_size)) {
+                    for dx in 2..=(block_size.saturating_sub(b_size)) {
                         let tx = bx + dx;
                         let ty = by + dy;
                         
-                        let b_size = match zone {
-                            ZoneType::Residential => 3,
-                            _ => 4,
-                        };
-
                         let mut nearest_road = None;
+                        // Find if there's an adjacent road
                         'outer: for oy in 0..b_size {
                             for ox in 0..b_size {
                                 if tx + ox >= grid.width || ty + oy >= grid.height { continue; }
@@ -210,12 +213,28 @@ pub fn build_starter_scenario(
 
                         if let Some((seg_id, road_tile)) = nearest_road {
                             let road_t = roads.get_tile_t(seg_id, road_tile);
+                            // Set zoning before trying to spawn so it overrides empty tiles
+                            for oy in 0..b_size {
+                                for ox in 0..b_size {
+                                    if tx + ox < grid.width && ty + oy < grid.height {
+                                        if grid.get(tx + ox, ty + oy) == Some(Tile::Empty) {
+                                            grid.set(tx + ox, ty + oy, Tile::Zone(zone));
+                                        }
+                                    }
+                                }
+                            }
                             if let Some(bid) = spawn_building(&mut buildings, &mut grid, (tx, ty), zone, seg_id, road_t) {
                                 if first_building_id.is_none() {
                                     first_building_id = Some(bid);
                                 }
+                                placed_any = true;
+                                // Skip forward to not overlap with this building
+                                break; 
                             }
                         }
+                    }
+                    if placed_any && b_size == 4 {
+                        break; // Only place one 4x4 building per block to avoid crowding
                     }
                 }
             }
