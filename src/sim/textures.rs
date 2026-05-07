@@ -4,7 +4,6 @@ use bevy::{
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages},
 };
-use bytemuck::cast_slice;
 
 use super::{buildings::BuildingData, people::PeopleData, roads::RoadData};
 
@@ -48,66 +47,8 @@ fn new_f32_texture(w: u32, h: u32, format: TextureFormat) -> Image {
         format,
         RenderAssetUsages::default(),
     );
-    // Storage binding is only needed once compute shaders are wired up; keep
-    // the simpler usage for now so drivers without Rgba32Float storage support
-    // (e.g. some Adreno variants) don't refuse the texture.
     img.texture_descriptor.usage =
         TextureUsages::COPY_DST | TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
     img
 }
 
-/// Writes the dirty CPU shadows into the corresponding GPU textures.
-/// Called each frame from the compute plugin.
-pub fn upload_dirty_textures(
-    images: &mut Assets<Image>,
-    dt: &DataTextures,
-    people: &mut PeopleData,
-    roads: &mut RoadData,
-    buildings: &mut BuildingData,
-    grid: &crate::sim::grid::CityGrid,
-) {
-    if people.dirty {
-        if let Some(img) = images.get_mut(&dt.people) {
-            let bytes: &[u8] = cast_slice(&people.rows);
-            fit_bytes(img, bytes);
-        }
-        people.dirty = false;
-    }
-    if roads.dirty {
-        if let Some(img) = images.get_mut(&dt.roads) {
-            let bytes: &[u8] = cast_slice(&roads.rows);
-            fit_bytes(img, bytes);
-        }
-        if let Some(img) = images.get_mut(&dt.road_points) {
-            let pts_f32: Vec<f32> = roads.all_points.iter()
-                .flat_map(|&(x, y)| vec![x as f32, y as f32])
-                .collect();
-            let bytes: &[u8] = cast_slice(&pts_f32);
-            fit_bytes(img, bytes);
-        }
-        roads.dirty = false;
-    }
-    if buildings.dirty {
-        if let Some(img) = images.get_mut(&dt.buildings) {
-            let bytes: &[u8] = cast_slice(&buildings.rows);
-            fit_bytes(img, bytes);
-        }
-        buildings.dirty = false;
-    }
-    
-    // Unconditionally upload grid elevations (it is a small 128x128 map)
-    if let Some(img) = images.get_mut(&dt.elevations) {
-        let bytes: &[u8] = cast_slice(&grid.elevations);
-        fit_bytes(img, bytes);
-    }
-}
-
-fn fit_bytes(img: &mut Image, src: &[u8]) {
-    // src may be shorter than texture (capacity > live rows); pad with zero-init bytes.
-    let Some(data) = img.data.as_mut() else { return; };
-    let n = src.len().min(data.len());
-    data[..n].copy_from_slice(&src[..n]);
-    for b in &mut data[n..] {
-        *b = 0;
-    }
-}

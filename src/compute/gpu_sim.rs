@@ -2,12 +2,103 @@ use bevy::{
     prelude::*,
     render::{
         render_resource::*,
-        renderer::{RenderDevice, RenderContext},
+        renderer::{RenderDevice, RenderContext, RenderQueue},
         Render, RenderApp,
         extract_resource::{ExtractResource, ExtractResourcePlugin},
         render_graph::{RenderLabel, NodeRunError, RenderGraphContext},
     },
 };
+
+#[derive(Resource, Default, Clone, bevy::render::extract_resource::ExtractResource)]
+pub struct ExtractedTextureUpdates {
+    pub people: Option<Vec<u8>>,
+    pub roads: Option<Vec<u8>>,
+    pub road_points: Option<Vec<f32>>,
+    pub buildings: Option<Vec<u8>>,
+}
+
+pub fn apply_texture_updates(
+    render_queue: Res<RenderQueue>,
+    updates: Res<ExtractedTextureUpdates>,
+    gpu_images: Res<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>,
+    textures: Res<GpuSimTextures>,
+    params: Res<GpuSimParams>,
+) {
+    if let (Some(data), Some(handle)) = (&updates.people, &textures.people) {
+        if let Some(gpu_img) = gpu_images.get(handle) {
+            let width = params.people_tex_w;
+            let rows = ((data.len() / 16) as u32 + width - 1) / width;
+            if rows > 0 {
+                render_queue.write_texture(
+                    gpu_img.texture.as_image_copy(),
+                    data,
+                    TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(width * 16),
+                        rows_per_image: None,
+                    },
+                    Extent3d { width, height: rows, depth_or_array_layers: 1 }
+                );
+            }
+        }
+    }
+    if let (Some(data), Some(handle)) = (&updates.roads, &textures.roads) {
+        if let Some(gpu_img) = gpu_images.get(handle) {
+            let width = params.roads_tex_w;
+            let rows = ((data.len() / 16) as u32 + width - 1) / width;
+            if rows > 0 {
+                render_queue.write_texture(
+                    gpu_img.texture.as_image_copy(),
+                    data,
+                    TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(width * 16),
+                        rows_per_image: None,
+                    },
+                    Extent3d { width, height: rows, depth_or_array_layers: 1 }
+                );
+            }
+        }
+    }
+    if let (Some(data), Some(handle)) = (&updates.road_points, &textures.road_points) {
+        if let Some(gpu_img) = gpu_images.get(handle) {
+            let data_bytes: &[u8] = bytemuck::cast_slice(data);
+            let width = 1024;
+            let rows = ((data_bytes.len() / 8) as u32 + width - 1) / width;
+            if rows > 0 {
+                render_queue.write_texture(
+                    gpu_img.texture.as_image_copy(),
+                    data_bytes,
+                    TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(width * 8), // Rg32Float is 8 bytes
+                        rows_per_image: None,
+                    },
+                    Extent3d { width, height: rows, depth_or_array_layers: 1 }
+                );
+            }
+        }
+    }
+    if let (Some(data), Some(handle)) = (&updates.buildings, &textures.buildings) {
+        if let Some(gpu_img) = gpu_images.get(handle) {
+            let width = params.buildings_tex_w;
+            let rows = ((data.len() / 16) as u32 + width - 1) / width;
+            if rows > 0 {
+                render_queue.write_texture(
+                    gpu_img.texture.as_image_copy(),
+                    data,
+                    TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(width * 16),
+                        rows_per_image: None,
+                    },
+                    Extent3d { width, height: rows, depth_or_array_layers: 1 }
+                );
+            }
+        }
+    }
+}
+
 use bytemuck::{Pod, Zeroable};
 use std::borrow::Cow;
 use std::sync::Mutex;
@@ -130,7 +221,8 @@ impl Plugin for GpuSimPlugin {
         app.insert_resource(StatsReceiver(Mutex::new(rx_s)));
 
         app.add_plugins(ExtractResourcePlugin::<GpuSimParams>::default())
-           .add_plugins(ExtractResourcePlugin::<GpuSimTextures>::default());
+           .add_plugins(ExtractResourcePlugin::<GpuSimTextures>::default())
+           .add_plugins(ExtractResourcePlugin::<ExtractedTextureUpdates>::default());
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
@@ -147,6 +239,7 @@ impl Plugin for GpuSimPlugin {
             .init_resource::<GpuStatsBuffer>()
             .init_resource::<GpuOccupancyBuffer>()
             .add_systems(Render, (
+                apply_texture_updates,
                 prepare_gpu_sim_buffers,
                 prepare_readback_buffers,
             ).in_set(bevy::render::RenderSystems::Prepare))

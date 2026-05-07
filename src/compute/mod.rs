@@ -11,7 +11,7 @@ pub mod gpu_pathfinding;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::sim::textures::{create_data_textures, upload_dirty_textures, DataTextures};
+use crate::sim::textures::{create_data_textures, DataTextures};
 use crate::sim::{
     buildings::BuildingData,
     people::PeopleData,
@@ -69,10 +69,77 @@ impl Plugin for ComputePlugin {
                 update_schedule_state,
                 sync_gpu_textures_and_params,
                 gpu_sim::apply_gpu_readback,
-                upload_dirty_textures_system,
+                queue_texture_updates_system,
             ).chain().run_if(in_state(AppState::InGame)));
     }
 }
+
+fn queue_texture_updates_system(
+    mut commands: Commands,
+    mut people: ResMut<PeopleData>,
+    mut roads: ResMut<RoadData>,
+    mut buildings: ResMut<BuildingData>,
+) {
+    let mut ext = gpu_sim::ExtractedTextureUpdates::default();
+    if people.dirty {
+        let width = people.tex_width as usize;
+        let elements = people.len as usize;
+        if elements > 0 {
+            let mut bytes = bytemuck::cast_slice(&people.rows[..elements]).to_vec();
+            // Pad bytes to full width row to satisfy WGPU
+            let row_bytes = width * 16;
+            let remainder = bytes.len() % row_bytes;
+            if remainder != 0 {
+                bytes.extend(vec![0u8; row_bytes - remainder]);
+            }
+            ext.people = Some(bytes);
+        }
+        people.dirty = false;
+    }
+    if roads.dirty {
+        let width = roads.tex_width as usize;
+        let elements = roads.segments.len();
+        if elements > 0 {
+            let mut bytes = bytemuck::cast_slice(&roads.rows[..elements]).to_vec();
+            let row_bytes = width * 16;
+            let remainder = bytes.len() % row_bytes;
+            if remainder != 0 {
+                bytes.extend(vec![0u8; row_bytes - remainder]);
+            }
+            ext.roads = Some(bytes);
+        }
+        
+        let mut pts_bytes: Vec<u8> = bytemuck::cast_slice(
+            &roads.all_points.iter().flat_map(|&(x, y)| vec![x as f32, y as f32]).collect::<Vec<f32>>()
+        ).to_vec();
+        if !pts_bytes.is_empty() {
+            let row_bytes = 1024 * 8; // Rg32Float = 8 bytes, width = 1024
+            let remainder = pts_bytes.len() % row_bytes;
+            if remainder != 0 {
+                pts_bytes.extend(vec![0u8; row_bytes - remainder]);
+            }
+            ext.road_points = Some(bytemuck::cast_slice(&pts_bytes).to_vec()); // Store as f32 internally in resource
+        }
+        
+        roads.dirty = false;
+    }
+    if buildings.dirty {
+        let width = buildings.tex_width as usize;
+        let elements = buildings.items.len();
+        if elements > 0 {
+            let mut bytes = bytemuck::cast_slice(&buildings.rows[..elements]).to_vec();
+            let row_bytes = width * 16;
+            let remainder = bytes.len() % row_bytes;
+            if remainder != 0 {
+                bytes.extend(vec![0u8; row_bytes - remainder]);
+            }
+            ext.buildings = Some(bytes);
+        }
+        buildings.dirty = false;
+    }
+    commands.insert_resource(ext);
+}
+
 
 fn update_schedule_state(mut state: ResMut<SimScheduleState>) {
     state.current_frame = (state.current_frame + 1) % state.cycle_frames;
@@ -191,14 +258,3 @@ fn sync_gpu_textures_and_params(
     path_params.max_path_len = 256;
 }
 
-fn upload_dirty_textures_system(
-    mut images: ResMut<Assets<Image>>,
-    dt: Option<Res<DataTextures>>,
-    mut people: ResMut<PeopleData>,
-    mut roads: ResMut<RoadData>,
-    mut buildings: ResMut<BuildingData>,
-    grid: Res<crate::sim::grid::CityGrid>,
-) {
-    let Some(dt) = dt else { return; };
-    upload_dirty_textures(&mut images, &dt, &mut people, &mut roads, &mut buildings, &grid);
-}
