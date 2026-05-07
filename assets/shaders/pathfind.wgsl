@@ -101,13 +101,48 @@ fn seg_coords(seg: u32) -> array<vec2<i32>, 5> {
     return array<vec2<i32>, 5>(c0, c1, c2, c3, c4);
 }
 
-const MAX_FRONTIER: u32 = 1024u;
-var<workgroup> frontier: array<u32, 1024>;
-var<workgroup> frontier_next: array<u32, 1024>;
-var<workgroup> frontier_len: atomic<u32>;
-var<workgroup> frontier_next_len: atomic<u32>;
+const MAX_OPEN: u32 = 1024u;
+var<workgroup> open_data: array<u32, 1024>;
+var<workgroup> open_g: array<f32, 1024>;
+var<workgroup> next_data: array<u32, 1024>;
+var<workgroup> next_g: array<f32, 1024>;
+var<workgroup> next_len: atomic<u32>;
 var<workgroup> found: atomic<u32>;
+var<workgroup> shared_v: u32;
 var<workgroup> shared_req_id: u32;
+
+fn pack_f(f: f32, id: u32) -> u32 {
+    let f_u = u32(clamp(f * 100.0, 0.0, 524287.0));
+    return (f_u << 13) | (id & 0x1FFFu);
+}
+
+fn unpack_id(data: u32) -> u32 {
+    return data & 0x1FFFu;
+}
+
+fn sort_open(lidx: u32) {
+    for (var k: u32 = 2u; k <= 1024u; k = k << 1u) {
+        for (var j: u32 = k >> 1u; j > 0u; j = j >> 1u) {
+            for (var c: u32 = 0u; c < 8u; c = c + 1u) {
+                let idx = lidx * 8u + c;
+                let ixj = idx ^ j;
+                if (ixj > idx) {
+                    let da = open_data[idx];
+                    let db = open_data[ixj];
+                    let asc = (idx & k) == 0u;
+                    if ((asc && da > db) || (!asc && da < db)) {
+                        open_data[idx] = db;
+                        open_data[ixj] = da;
+                        let ga = open_g[idx];
+                        open_g[idx] = open_g[ixj];
+                        open_g[ixj] = ga;
+                    }
+                }
+            }
+            workgroupBarrier();
+        }
+    }
+}
 
 @compute @workgroup_size(64)
 fn main(
@@ -121,8 +156,6 @@ fn main(
     let req_id = shared_req_id;
     let max_req = min(atomicLoad(&path_queue.count_x), 16384u);
 
-    // D3D12/FXC compiler complains if we return early inside a workgroup barrier loop
-    // To solve this, we don't return early. We use a boolean flag to wrap all operations.
     let is_valid_req = req_id < max_req;
     var req: PathRequest;
     if is_valid_req {
@@ -141,93 +174,132 @@ fn main(
         }
         init_idx = init_idx + 64u;
     }
-    
+
+    var target_pos: vec2<f32>;
+    if is_valid_req {
+        let target_coords = seg_coords(req.target_seg);
+        let target_t0 = textureLoad(roads_tex, target_coords[0]);
+        target_pos = target_t0.xy;
+    }
+
     if lidx == 0u {
-        atomicStore(&frontier_len, 1u);
-        atomicStore(&frontier_next_len, 0u);
         if is_valid_req {
             if req.start == req.target_seg {
                 atomicStore(&found, 1u);
             } else {
                 atomicStore(&found, 0u);
             }
-            frontier[0] = req.start;
+            let start_coords = seg_coords(req.start);
+            let start_t0 = textureLoad(roads_tex, start_coords[0]);
+            let h = distance(start_t0.xy, target_pos);
+            open_data[0] = pack_f(h, req.start);
+            open_g[0] = 0.0;
             init_prev(base_prev, req.start, req.start);
+        } else {
+            open_data[0] = 0xFFFFFFFFu;
+        }
+        for (var i: u32 = 1u; i < 1024u; i = i + 1u) {
+            open_data[i] = 0xFFFFFFFFu;
         }
     }
     workgroupBarrier();
 
-    // Expand frontier.
-    for (var level: u32 = 0u; level < params.max_path_len; level = level + 1u) {
+    // A* iterations.
+    for (var step: u32 = 0u; step < params.max_path_len; step = step + 1u) {
+        sort_open(lidx);
+
         let is_found = atomicLoad(&found);
-        let flen = atomicLoad(&frontier_len);
-        
-        var i = lidx;
-        while i < flen && is_found == 0u {
-            if is_valid_req {
-                let cur = frontier[i];
-                let coords = seg_coords(cur);
-                let t2 = textureLoad(roads_tex, coords[2]);
-                let t3 = textureLoad(roads_tex, coords[3]);
-                
-                let count_a = u32(t2.w);
-                let count_b = u32(t3.w);
-                let total_count = count_a + count_b;
+        if is_found != 0u { break; }
+        if open_data[0] == 0xFFFFFFFFu { break; } // Open set empty
 
-                for (var n: u32 = 0u; n < 6u; n = n + 1u) {
-                    var nb: u32;
-                    if n < count_a { 
-                        if (n == 0u) { nb = u32(t2.x); }
-                        else if (n == 1u) { nb = u32(t2.y); }
-                        else { nb = u32(t2.z); }
-                    }
-                    else if n < total_count { 
-                        let bn = n - count_a;
-                        if (bn == 0u) { nb = u32(t3.x); }
-                        else if (bn == 1u) { nb = u32(t3.y); }
-                        else { nb = u32(t3.z); }
-                    }
-                    else { continue; }
-                    
-                    if nb >= params.segments_count { continue; }
+        if lidx == 0u { atomicStore(&next_len, 0u); }
+        workgroupBarrier();
 
-                    if set_prev_if_empty(base_prev, nb, cur) {
-                        if nb == req.target_seg {
-                            atomicStore(&found, 1u);
-                        }
-                        let next_idx = atomicAdd(&frontier_next_len, 1u);
-                        if next_idx < MAX_FRONTIER {
-                            frontier_next[next_idx] = nb;
-                        }
+        // Expand top 64 nodes in parallel.
+        let cur_packed = open_data[lidx];
+        if is_valid_req && cur_packed != 0xFFFFFFFFu {
+            let cur = unpack_id(cur_packed);
+            let cur_g = open_g[lidx];
+
+            // Mark as processed in the open set
+            open_data[lidx] = 0xFFFFFFFFu;
+
+            let coords = seg_coords(cur);
+            let t2 = textureLoad(roads_tex, coords[2]);
+            let t3 = textureLoad(roads_tex, coords[3]);
+
+            let count_a = u32(t2.w);
+            let count_b = u32(t3.w);
+            let total_count = count_a + count_b;
+
+            for (var n: u32 = 0u; n < 6u; n = n + 1u) {
+                var nb: u32;
+                if n < count_a { 
+                    if (n == 0u) { nb = u32(t2.x); }
+                    else if (n == 1u) { nb = u32(t2.y); }
+                    else { nb = u32(t2.z); }
+                }
+                else if n < total_count { 
+                    let bn = n - count_a;
+                    if (bn == 0u) { nb = u32(t3.x); }
+                    else if (bn == 1u) { nb = u32(t3.y); }
+                    else { nb = u32(t3.z); }
+                }
+                else { continue; }
+
+                if nb >= params.segments_count { continue; }
+
+                if set_prev_if_empty(base_prev, nb, cur) {
+                    if nb == req.target_seg {
+                        atomicStore(&found, 1u);
+                    }
+
+                    let nb_coords = seg_coords(nb);
+                    let nb_t0 = textureLoad(roads_tex, nb_coords[0]);
+                    let nb_t1 = textureLoad(roads_tex, nb_coords[1]);
+                    let nb_cost = nb_t1.w / max(0.1, nb_t1.x);
+                    let nb_g = cur_g + nb_cost;
+                    let nb_h = distance(nb_t0.xy, target_pos);
+                    let nb_f = nb_g + nb_h;
+
+                    let slot = atomicAdd(&next_len, 1u);
+                    if slot < 1024u {
+                        next_data[slot] = pack_f(nb_f, nb);
+                        next_g[slot] = nb_g;
                     }
                 }
             }
+        }
+        workgroupBarrier();
+
+        // Merge next into open set.
+        if lidx == 0u {
+            var v: u32 = 0u;
+            while v < 1024u && open_data[v] != 0xFFFFFFFFu {
+                v = v + 1u;
+            }
+            shared_v = v;
+        }
+        workgroupBarrier();
+
+        let nlen = atomicLoad(&next_len);
+        let v = shared_v;
+
+        var i = lidx;
+        while i < nlen {
+            var slot: u32;
+            if i < 64u {
+                slot = i; // Reuse the slots we just expanded
+            } else {
+                slot = v + (i - 64u);
+            }
+            if slot < 1024u {
+                open_data[slot] = next_data[i];
+                open_g[slot] = next_g[i];
+            }
             i = i + 64u;
         }
-        
         workgroupBarrier();
-        
-        let nlen = atomicLoad(&frontier_next_len);
-        
-        if lidx == 0u {
-            atomicStore(&frontier_len, min(nlen, MAX_FRONTIER));
-            atomicStore(&frontier_next_len, 0u);
-        }
-        
-        workgroupBarrier();
-        
-        var j = lidx;
-        while j < atomicLoad(&frontier_len) && atomicLoad(&found) == 0u {
-            if is_valid_req {
-                frontier[j] = frontier_next[j];
-            }
-            j = j + 64u;
-        }
-        
-        workgroupBarrier();
-        
-        // We can't break early safely in D3D12 if it bypasses workgroupBarrier.
-        // But since we removed breaks, we just spin idly if found == 1u or nlen == 0u.
     }
 
     // Reconstruct path.
@@ -237,7 +309,7 @@ fn main(
 
         if atomicLoad(&found) == 1u {
             var cur = req.target_seg;
-            var path_tmp: array<u32, 256>; // Local temporary storage for reversal
+            var path_tmp: array<u32, 256>;
             var count: u32 = 0u;
 
             while count < params.max_path_len {
@@ -248,18 +320,14 @@ fn main(
                 cur = u32(p);
             }
 
-            // Store path in forward order.
             for (var k: u32 = 0u; k < count; k = k + 1u) {
                 paths[base_path + k] = path_tmp[count - 1u - k];
             }
-
-            // Pad the rest of the path buffer with the sentinel value
             for (var k: u32 = count; k < params.max_path_len; k = k + 1u) {
                 paths[base_path + k] = 0xFFFFFFFFu;
             }
         } else {
-             // Path not found, set the first element to sentinel so the car fails gracefully.
              paths[base_path] = 0xFFFFFFFFu;
         }
     }
-    }
+}
