@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use super::{
     buildings::{spawn_building, BuildingData},
     grid::{CityGrid, Tile, ZoneType},
-    roads::RoadData,
+    roads::{RoadData, RoadType},
     SpawnPeopleRequest,
 };
 use crate::ui::inspector::{Selection, SelectedObj};
@@ -71,9 +71,9 @@ pub fn build_starter_scenario(
                 }
                 let here = (x, y);
                 if let Some(other) = prev {
-                    roads.push_link(here, other);
+                    roads.push_link(here, other, RoadType::Normal);
                 } else {
-                    roads.push_link(here, here);
+                    roads.push_link(here, here, RoadType::Normal);
                 }
                 prev = Some(here);
             }
@@ -89,9 +89,9 @@ pub fn build_starter_scenario(
                 }
                 let here = (x, y);
                 if let Some(other) = prev {
-                    roads.push_link(here, other);
+                    roads.push_link(here, other, RoadType::Normal);
                 } else {
-                    roads.push_link(here, here);
+                    roads.push_link(here, here, RoadType::Normal);
                 }
                 prev = Some(here);
             }
@@ -115,7 +115,7 @@ pub fn build_starter_scenario(
                 let x_end = right.0;
                 let y = current.1 + mid_oy;
                 for x in x_start..=x_end {
-                    roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y));
+                    roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y), RoadType::Highway);
                 }
             }
 
@@ -126,7 +126,7 @@ pub fn build_starter_scenario(
                 let y_end = down.1;
                 let x = current.0 + mid_ox;
                 for y in y_start..=y_end {
-                    roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)));
+                    roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)), RoadType::Highway);
                 }
             }
         }
@@ -139,7 +139,28 @@ pub fn build_starter_scenario(
     let entry_y = offsets[0].1 + mid_gy * block_size;
 
     for ((tx, ty), seg_id) in tile_to_seg {
-        grid.set(tx, ty, Tile::Road(seg_id));
+        let rtype = roads.segments[seg_id as usize].road_type;
+        if rtype == RoadType::Highway {
+            for dx in -1..=2 {
+                for dy in -1..=2 {
+                    let nx = tx as i32 + dx;
+                    let ny = ty as i32 + dy;
+                    if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {
+                        grid.set(nx as u32, ny as u32, Tile::Road(seg_id));
+                    }
+                }
+            }
+        } else {
+            for dx in 0..=1 {
+                for dy in 0..=1 {
+                    let nx = tx as u32 + dx;
+                    let ny = ty as u32 + dy;
+                    if nx < grid.width && ny < grid.height {
+                        grid.set(nx, ny, Tile::Road(seg_id));
+                    }
+                }
+            }
+        }
         if tx == entry_x && ty == entry_y {
             entry_seg = seg_id;
         }

@@ -16,8 +16,15 @@
 use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]
+pub enum RoadType {
+    #[default]
+    Normal,
+    Highway,
+}
+
 pub const ROAD_CAPACITY: u32 = 8192;
-pub const TEXELS_PER_SEGMENT: u32 = 4;
+pub const TEXELS_PER_SEGMENT: u32 = 5;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
@@ -42,6 +49,11 @@ pub struct RoadRow {
     pub conn_b1: f32,
     pub conn_b2: f32,
     pub count_b: f32,
+    // Texel 4: Extra metadata
+    pub road_type: f32, // 0 for Normal, 1 for Highway
+    pub unused1: f32,
+    pub unused2: f32,
+    pub unused3: f32,
 }
 
 /// A single link between two adjacent tiles.
@@ -49,6 +61,7 @@ pub struct RoadRow {
 pub struct RoadLink {
     pub a: (u32, u32),
     pub b: (u32, u32),
+    pub road_type: RoadType,
 }
 
 /// A super-segment consisting of multiple links between two junctions/ends.
@@ -65,6 +78,7 @@ pub struct RoadSegment {
     pub speed_mean: f32,
     pub length: f32,
     pub links_offset: u32,
+    pub road_type: RoadType,
 }
 
 #[derive(Resource)]
@@ -105,17 +119,14 @@ impl Default for RoadData {
 
 impl RoadData {
     /// Add a raw link between two tiles. Does NOT update the GPU until rebuild_topology is called.
-    pub fn push_link(&mut self, a: (u32, u32), b: (u32, u32)) {
+    pub fn push_link(&mut self, a: (u32, u32), b: (u32, u32), road_type: RoadType) {
         if a == b {
             // Self-links are only to ensure isolated tiles exist in the system.
-            // If the tile is already connected to something, don't add the self-link.
-            // But we don't know that here easily.
-            // Let's just allow it, but we MUST filter them out if real links exist during rebuild.
         }
-        if self.links.contains(&RoadLink { a, b }) || self.links.contains(&RoadLink { a: b, b: a }) {
+        if self.links.contains(&RoadLink { a, b, road_type }) || self.links.contains(&RoadLink { a: b, b: a, road_type }) {
             return;
         }
-        self.links.push(RoadLink { a, b });
+        self.links.push(RoadLink { a, b, road_type });
         self.dirty = true;
     }
 
@@ -124,15 +135,18 @@ impl RoadData {
     pub fn rebuild_topology(&mut self) -> Vec<((u32, u32), u32)> {
         use std::collections::{HashMap, HashSet};
         
-        let mut adj: HashMap<(u32, u32), Vec<(u32, u32)>> = HashMap::new();
+        let mut adj: HashMap<(u32, u32), Vec<(u32, u32, RoadType)>> = HashMap::new();
         for link in &self.links {
-            adj.entry(link.a).or_default().push(link.b);
-            adj.entry(link.b).or_default().push(link.a);
+            adj.entry(link.a).or_default().push((link.b.0, link.b.1, link.road_type));
+            adj.entry(link.b).or_default().push((link.a.0, link.a.1, link.road_type));
         }
 
-        // A junction is any point with != 2 neighbours.
+        // A junction is any point with != 2 neighbours OR where neighbour types differ.
         let junctions: HashSet<(u32, u32)> = adj.iter()
-            .filter(|(_, neighbors)| neighbors.len() != 2)
+            .filter(|(_, neighbors)| {
+                if neighbors.len() != 2 { return true; }
+                neighbors[0].2 != neighbors[1].2
+            })
             .map(|(&pos, _)| pos)
             .collect();
 
@@ -143,8 +157,9 @@ impl RoadData {
         // Start from each junction and follow paths
         for &start_junction in &junctions {
             if let Some(neighbors) = adj.get(&start_junction) {
-                for &neighbor in neighbors {
-                    let link = if start_junction < neighbor { (start_junction, neighbor) } else { (neighbor, start_junction) };
+                for &(nx, ny, rtype) in neighbors {
+                    let neighbor = (nx, ny);
+                    let link = if start_junction < neighbor { (start_junction, neighbor, rtype) } else { (neighbor, start_junction, rtype) };
                     if visited_links.contains(&link) { continue; }
                     
                     // Follow the path
@@ -156,8 +171,9 @@ impl RoadData {
                     
                     while !junctions.contains(&current) {
                         let nexts = &adj[&current];
-                        let next = if nexts[0] == prev { nexts[1] } else { nexts[0] };
-                        let next_link = if current < next { (current, next) } else { (next, current) };
+                        let next_info = if (nexts[0].0, nexts[0].1) == prev { nexts[1] } else { nexts[0] };
+                        let next = (next_info.0, next_info.1);
+                        let next_link = if current < next { (current, next, rtype) } else { (next, current, rtype) };
                         
                         path.push(next);
                         visited_links.insert(next_link);
@@ -178,9 +194,10 @@ impl RoadData {
                         points: path,
                         conn_a: Vec::new(),
                         conn_b: Vec::new(),
-                        speed_mean: 1.0,
+                        speed_mean: if rtype == RoadType::Highway { 2.0 } else { 1.0 },
                         length,
                         links_offset: 0,
+                        road_type: rtype,
                     });
                 }
             }
@@ -188,7 +205,7 @@ impl RoadData {
 
         // Handle isolated loops (no junctions)
         for link_obj in &self.links {
-            let link = if link_obj.a < link_obj.b { (link_obj.a, link_obj.b) } else { (link_obj.b, link_obj.a) };
+            let link = if link_obj.a < link_obj.b { (link_obj.a, link_obj.b, link_obj.road_type) } else { (link_obj.b, link_obj.a, link_obj.road_type) };
             if visited_links.contains(&link) { continue; }
 
             // This must be part of a loop. Pick an arbitrary start.
@@ -196,11 +213,13 @@ impl RoadData {
             visited_links.insert(link);
             let mut current = link_obj.b;
             let mut prev = link_obj.a;
+            let rtype = link_obj.road_type;
             
             while current != link_obj.a {
                 let nexts = &adj[&current];
-                let next = if nexts[0] == prev { nexts[1] } else { nexts[0] };
-                let next_link = if current < next { (current, next) } else { (next, current) };
+                let next_info = if (nexts[0].0, nexts[0].1) == prev { nexts[1] } else { nexts[0] };
+                let next = (next_info.0, next_info.1);
+                let next_link = if current < next { (current, next, rtype) } else { (next, current, rtype) };
                 path.push(next);
                 visited_links.insert(next_link);
                 prev = current;
@@ -218,9 +237,10 @@ impl RoadData {
                 points: path,
                 conn_a: Vec::new(),
                 conn_b: Vec::new(),
-                speed_mean: 1.0,
+                speed_mean: if rtype == RoadType::Highway { 2.0 } else { 1.0 },
                 length,
                 links_offset: 0,
+                road_type: rtype,
             });
         }
 
@@ -311,6 +331,12 @@ impl RoadData {
             conn_b1: seg.conn_b.get(1).copied().unwrap_or(0) as f32,
             conn_b2: seg.conn_b.get(2).copied().unwrap_or(0) as f32,
             count_b: seg.conn_b.len() as f32,
+
+            road_type: match seg.road_type {
+                RoadType::Normal => 0.0,
+                RoadType::Highway => 1.0,
+            },
+            ..default()
         };
     }
 }

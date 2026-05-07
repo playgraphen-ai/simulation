@@ -99,14 +99,15 @@ fn building_coords(bid: u32) -> array<vec2<i32>, 3> {
     return array<vec2<i32>, 3>(c0, c1, c2);
 }
 
-fn road_coords(sid: u32) -> array<vec2<i32>, 4> {
-    let base = i32(sid * 4u);
+fn road_coords(sid: u32) -> array<vec2<i32>, 5> {
+    let base = i32(sid * 5u);
     let w = max(1, i32(params.roads_tex_w));
     let c0 = vec2<i32>(base % w, base / w);
     let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
     let c2 = vec2<i32>((base + 2) % w, (base + 2) / w);
     let c3 = vec2<i32>((base + 3) % w, (base + 3) / w);
-    return array<vec2<i32>, 4>(c0, c1, c2, c3);
+    let c4 = vec2<i32>((base + 4) % w, (base + 4) / w);
+    return array<vec2<i32>, 5>(c0, c1, c2, c3, c4);
 }
 
 const ACT_TRAVEL: f32 = 0.0;
@@ -142,6 +143,8 @@ fn main_people_occupancy(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r_coords = road_coords(current_seg);
         let r_tex0 = textureLoad(roads_tex, r_coords[0]);
         let r_tex1 = textureLoad(roads_tex, r_coords[1]);
+        let r_tex4 = textureLoad(roads_tex, r_coords[4]);
+        let rtype = r_tex4.x;
         let seg_len = max(0.5, r_tex1.w);
 
         var start_at_b = false;
@@ -161,7 +164,13 @@ fn main_people_occupancy(@builtin(global_invocation_id) gid: vec3<u32>) {
         
         let dir = normalize(vec2<f32>(bx - ax, by - ay));
         let side = vec2<f32>(-dir.y, dir.x);
-        let offset = select(0.35, -0.35, start_at_b);
+        
+        var offset = select(0.35, -0.35, start_at_b);
+        if rtype == 1.0 {
+            let lane = f32(pid % 2u);
+            let lane_offset = 0.5 + lane * 1.0;
+            offset = select(lane_offset, -lane_offset, start_at_b);
+        }
         
         let pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), frac) + side * offset;
         let tx = u32(pos.x + 0.5);
@@ -263,10 +272,19 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let ax = r_tex0.x; let ay = r_tex0.y;
                 let bx = r_tex0.z; let by = r_tex0.w;
                 
+                let r_tex4 = textureLoad(roads_tex, r_coords[4]);
+                let rtype = r_tex4.x;
+
                 let dir = normalize(vec2<f32>(bx - ax, by - ay));
                 let side = vec2<f32>(-dir.y, dir.x);
-                let offset = select(0.35, -0.35, start_at_b);
                 
+                var offset = select(0.35, -0.35, start_at_b);
+                if rtype == 1.0 {
+                    let lane = f32(pid % 2u);
+                    let lane_offset = 0.5 + lane * 1.0;
+                    offset = select(lane_offset, -lane_offset, start_at_b);
+                }
+
                 let current_pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), current_frac) + side * offset;
                 let current_idx = u32(current_pos.x + 0.5) + u32(current_pos.y + 0.5) * params.grid_w;
 
@@ -291,8 +309,10 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                         if next_path_seg != 0xFFFFFFFFu {
                             let nr_coords = road_coords(next_path_seg);
                             let n_tex0 = textureLoad(roads_tex, nr_coords[0]);
+                            let n_tex4 = textureLoad(roads_tex, nr_coords[4]);
                             let n_ax = n_tex0.x; let n_ay = n_tex0.y;
                             let n_bx = n_tex0.z; let n_by = n_tex0.w;
+                            let n_rtype = n_tex4.x;
                             
                             var next_start_at_b = false;
                             let nseg_b = vec2<f32>(n_tex0.z, n_tex0.w);
@@ -302,7 +322,14 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                             
                             let n_dir = normalize(vec2<f32>(n_bx - n_ax, n_by - n_ay));
                             let n_side = vec2<f32>(-n_dir.y, n_dir.x);
-                            let n_offset = select(0.35, -0.35, next_start_at_b);
+                            
+                            var n_offset = select(0.35, -0.35, next_start_at_b);
+                            if n_rtype == 1.0 {
+                                let lane = f32(pid % 2u);
+                                let lane_offset = 0.5 + lane * 1.0;
+                                n_offset = select(lane_offset, -lane_offset, next_start_at_b);
+                            }
+
                             let n_frac = select(0.1, 0.9, next_start_at_b);
                             
                             let n_pos = mix(vec2<f32>(n_ax, n_ay), vec2<f32>(n_bx, n_by), n_frac) + n_side * n_offset;

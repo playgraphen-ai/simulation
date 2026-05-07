@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use crate::render::camera::CursorTile;
 use crate::sim::buildings::{spawn_building, BuildingData};
 use crate::sim::grid::{CityGrid, Tile, ZoneType};
-use crate::sim::roads::RoadData;
+use crate::sim::roads::{RoadData, RoadType};
 
 use super::tools::ActiveTool;
 
@@ -62,39 +62,58 @@ pub fn paint_tick_system(
                 }
             }
         }
-        ActiveTool::Road => {
+        ActiveTool::Road | ActiveTool::Highway => {
+            let rtype = if *active == ActiveTool::Highway { RoadType::Highway } else { RoadType::Normal };
             if matches!(grid.get(x, y), Some(Tile::Empty) | Some(Tile::Zone(_))) {
-                // Create a road link between this tile and any adjacent road tile.
+                // Create a road link between this tile and any adjacent road tile of SAME TYPE.
                 for (nx, ny) in grid.neighbours4(x, y) {
-                    if let Some(Tile::Road(_)) = grid.get(nx, ny) {
-                        roads.push_link((x, y), (nx, ny));
+                    if let Some(Tile::Road(sid)) = grid.get(nx, ny) {
+                        if roads.segments[sid as usize].road_type == rtype {
+                            roads.push_link((x, y), (nx, ny), rtype);
+                        }
                     }
                 }
                 // If no neighbours, still add as a self-link or just mark as road tile later.
-                roads.push_link((x, y), (x, y));
+                roads.push_link((x, y), (x, y), rtype);
                 
                 let tile_to_seg = roads.rebuild_topology();
                 
                 // Update the grid with the new super-segment IDs
                 for ((tx, ty), seg_id) in tile_to_seg {
-                    // Mark a 2x2 area around each road point to reserve space for the wider road.
-                    for dx in 0..2 {
-                        for dy in 0..2 {
-                            if tx + dx < grid.width && ty + dy < grid.height {
-                                grid.set(tx + dx, ty + dy, Tile::Road(seg_id));
+                    let rtype = roads.segments[seg_id as usize].road_type;
+                    if rtype == RoadType::Highway {
+                        for dx in -1..=2 {
+                            for dy in -1..=2 {
+                                let nx = tx as i32 + dx;
+                                let ny = ty as i32 + dy;
+                                if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {
+                                    grid.set(nx as u32, ny as u32, Tile::Road(seg_id));
+                                }
+                            }
+                        }
+                    } else {
+                        for dx in 0..=1 {
+                            for dy in 0..=1 {
+                                let nx = tx as u32 + dx;
+                                let ny = ty as u32 + dy;
+                                if nx < grid.width && ny < grid.height {
+                                    grid.set(nx, ny, Tile::Road(seg_id));
+                                }
                             }
                         }
                     }
                     
                     // Materialize adjacent zoned tiles as buildings.
                     // Check a radius large enough for 4x4.
-                    for ox in -4..=4i32 {
-                        for oy in -4..=4i32 {
+                    let search_radius = if rtype == RoadType::Highway { 6 } else { 4 };
+                    for ox in -search_radius..=search_radius {
+                        for oy in -search_radius..=search_radius {
                             let nx = tx as i32 + ox;
                             let ny = ty as i32 + oy;
                             if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {
                                 if let Some(Tile::Zone(z)) = grid.get(nx as u32, ny as u32) {
-                                    let road_t = roads.get_tile_t(seg_id, (tx, ty));
+                                    let road_tile = (tx, ty);
+                                    let road_t = roads.get_tile_t(seg_id, road_tile);
                                     spawn_building(&mut buildings, &mut grid, (nx as u32, ny as u32), z, seg_id, road_t);
                                 }
                             }

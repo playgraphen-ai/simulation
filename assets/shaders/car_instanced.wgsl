@@ -63,11 +63,14 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     if (activity == 0.0 || activity == 4.0) && current_seg != 0xFFFFFFFFu {
         let rw = i32(params.roads_tex_w);
         
-        let rbase = i32(current_seg * 4u);
+        let rbase = i32(current_seg * 5u);
         let rc0 = vec2<i32>(rbase % rw, rbase / rw);
         let rc1 = vec2<i32>((rbase + 1) % rw, (rbase + 1) / rw);
+        let rc4 = vec2<i32>((rbase + 4) % rw, (rbase + 4) / rw);
         let rtex0 = textureLoad(roads_tex, rc0, 0);
         let rtex1 = textureLoad(roads_tex, rc1, 0);
+        let rtex4 = textureLoad(roads_tex, rc4, 0);
+        let rtype = rtex4.x;
         
         let seg_len = max(0.01, rtex1.w); // total length is tex1.w
         let links_offset = u32(rtex1.y);
@@ -132,7 +135,12 @@ fn vertex(vertex: Vertex) -> VertexOutput {
             let right = normalize(cross(up, d));
             
             // Offset to the right lane
-            world_pos = world_pos + right * 0.25;
+            var offset = 0.35;
+            if rtype == 1.0 {
+                let lane = f32(pid % 2u);
+                offset = 0.5 + lane * 1.0;
+            }
+            world_pos = world_pos + right * offset;
 
             let real_up = cross(d, right);
             rot_matrix = mat3x3<f32>(

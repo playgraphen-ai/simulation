@@ -40,14 +40,15 @@ struct PathRequestQueue {
 @group(0) @binding(3) var<uniform> params: PathParams;
 @group(0) @binding(4) var<storage, read_write> path_queue: PathRequestQueue;
 
-fn seg_coords(seg: u32) -> array<vec2<i32>, 4> {
-    let base = seg * 4u;
+fn seg_coords(seg: u32) -> array<vec2<i32>, 5> {
+    let base = seg * 5u;
     let w = max(1u, params.roads_tex_w);
     let c0 = vec2<i32>(i32(base % w), i32(base / w));
     let c1 = vec2<i32>(i32((base + 1u) % w), i32((base + 1u) / w));
     let c2 = vec2<i32>(i32((base + 2u) % w), i32((base + 2u) / w));
     let c3 = vec2<i32>(i32((base + 3u) % w), i32((base + 3u) / w));
-    return array<vec2<i32>, 4>(c0, c1, c2, c3);
+    let c4 = vec2<i32>(i32((base + 4u) % w), i32((base + 4u) / w));
+    return array<vec2<i32>, 5>(c0, c1, c2, c3, c4);
 }
 
 const MAX_FRONTIER: u32 = 1024u;
