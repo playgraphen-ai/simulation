@@ -196,28 +196,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let target_t = w_tex2.z;
 
     let money = 50.0 + rand(&rng_state) * 450.0;
-    let age = 18.0 + rand(&rng_state) * 57.0;
+    let time_since_rent = rand(&rng_state) * 300.0;
 
-    // Start at the map edge (entry_seg, t=0.0)
-    let start_seg = params.entry_seg;
-    let start_t = 0.0;
+    // Start at home
+    let start_seg = home_seg_orig;
+    let start_t = home_t_orig;
 
-    // activity_code: 0.0 = Travel (ACT_TRAVEL)
-    // activity_time: -10.0 = Waiting for path timeout
-    let texel0 = vec4<f32>(money, age, f32(work_id), f32(home_id));
-    let texel1 = vec4<f32>(f32(work_id), 0.0, -10.0, 0.0);
-    let texel2 = vec4<f32>(f32(start_seg), f32(start_seg), start_t, target_t);
+    // activity_code: 1.0 = Home (ACT_HOME)
+    // activity_time: staggered randomly
+    let activity_time = rand(&rng_state) * params.home_duration;
+    
+    let texel0 = vec4<f32>(money, time_since_rent, f32(home_id), f32(home_id));
+    let texel1 = vec4<f32>(f32(home_id), 1.0, activity_time, 0.0);
+    let texel2 = vec4<f32>(f32(start_seg), f32(start_seg), start_t, start_t);
 
     textureStore(people_tex, p_coords[0], texel0);
     textureStore(people_tex, p_coords[1], texel1);
     textureStore(people_tex, p_coords[2], texel2);
-
-    // Queue path request
-    let req_idx = atomicAdd(&path_queue.count_x, 1u);
-    let max_queue = 65536u;
-    if req_idx < max_queue {
-        path_queue.requests[req_idx] = PathRequest(u32(start_seg), u32(target_seg), pid, 0u);
-    }
 
     // Reset path buffer for this person
     let path_idx = pid * 256u;

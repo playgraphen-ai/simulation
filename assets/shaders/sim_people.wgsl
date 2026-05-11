@@ -536,7 +536,8 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let start_seg = params.entry_seg;
             let start_t = 0.0;
 
-            texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, 18.0 + rand(&rng_state) * 57.0, f32(work_id), f32(home_id));
+            let time_since_rent = rand(&rng_state) * 300.0;
+            texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, time_since_rent, f32(work_id), f32(home_id));
             texel1 = vec4<f32>(f32(work_id), 0.0, -10.0, 0.0); // Travel, waiting for path
             texel2 = vec4<f32>(f32(start_seg), f32(start_seg), start_t, target_t);
             
@@ -572,7 +573,6 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             // Activity done — pick next destination and apply economy.
             var current_building: u32 = 0u;
             if activity == ACT_HOME {
-                money = max(0.0, money - params.rent_cost);
                 current_building = u32(home);
             } else if activity == ACT_WORK {
                 money = money + params.work_salary;

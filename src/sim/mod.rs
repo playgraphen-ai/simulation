@@ -15,6 +15,7 @@ pub mod counters;
 pub mod scenario;
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use crate::AppState;
 
 pub struct SimPlugin;
@@ -28,6 +29,7 @@ impl Plugin for SimPlugin {
             .init_resource::<counters::SimCounters>()
             .init_resource::<ActivityDurations>()
             .init_resource::<SimSettings>()
+            .init_resource::<GameTime>()
             .init_resource::<crate::compute::spawn::PendingGpuSpawns>()
             .add_message::<SpawnPeopleRequest>()
             // `startup` resets the grid, then `build_starter_scenario` paints
@@ -36,6 +38,7 @@ impl Plugin for SimPlugin {
         app.add_systems(Update, (
                 counters::update_counters_system,
                 crate::log_export::json_logger_system,
+                update_game_time,
             ).run_if(in_state(AppState::InGame)));
     }
 }
@@ -110,7 +113,7 @@ impl Default for SimSettings {
 /// How long each activity lasts on the CPU side, in seconds. Changes here are
 /// not applied retroactively to in-progress activities — the compute shader
 /// reads this resource only when a person transitions to a new activity.
-#[derive(Resource, Clone, Copy, Debug)]
+#[derive(Resource, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct ActivityDurations {
     pub home: f32,
     pub work: f32,
@@ -121,8 +124,36 @@ pub struct ActivityDurations {
 
 impl Default for ActivityDurations {
     fn default() -> Self {
-        Self { home: 30.0, work: 45.0, shop: 15.0, home_to_work_prob: 0.6 }
+        // Try to load from assets/sim_schedule.json
+        std::fs::read_to_string("assets/sim_schedule.json")
+            .ok()
+            .and_then(|s| serde_json::from_str::<ActivityDurations>(&s).ok())
+            .unwrap_or(Self { home: 150.0, work: 225.0, shop: 75.0, home_to_work_prob: 0.6 })
     }
+}
+
+/// Tracks both real-world time and scaled simulation time.
+#[derive(Resource, Default, Debug)]
+pub struct GameTime {
+    pub real_elapsed_secs: f32,
+}
+
+impl GameTime {
+    /// Returns (days, hours, minutes) in simulation time.
+    /// Scale: 5 real minutes = 1 simulation day.
+    pub fn simulation_time(&self) -> (u32, u32, u32) {
+        // 5 real mins = 1440 sim mins
+        // 1 real sec = 4.8 sim mins
+        let total_sim_mins = (self.real_elapsed_secs * 4.8) as u32;
+        let days = total_sim_mins / (24 * 60);
+        let hours = (total_sim_mins % (24 * 60)) / 60;
+        let mins = total_sim_mins % 60;
+        (days, hours, mins)
+    }
+}
+
+fn update_game_time(time: Res<Time>, mut game_time: ResMut<GameTime>) {
+    game_time.real_elapsed_secs += time.delta_secs();
 }
 
 /// UI-driven request to spawn N people at the map edge.
