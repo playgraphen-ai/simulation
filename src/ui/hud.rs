@@ -33,9 +33,12 @@ pub fn update_hud(
 ) {
     let Ok(mut text) = q.single_mut() else { return; };
     text.0 = format!(
-        "People: {}\nCars: {}\nResidential: {}\nOffice: {}\nShop: {}\nRoads: {}\nAbandoned: {}",
+        "People: {}\nTravelling (Cars): {}\nAt Home: {}\nAt Work: {}\nShopping: {}\nResidential: {}\nOffice: {}\nShop: {}\nRoads: {}\nAbandoned: {}",
         counters.people,
         counters.cars,
+        counters.res_occupants,
+        counters.office_occupants,
+        counters.shop_occupants,
         counters.residential,
         counters.offices,
         counters.shops,

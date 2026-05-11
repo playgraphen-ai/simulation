@@ -8,6 +8,9 @@ use super::roads::RoadData;
 pub struct SimCounters {
     pub people: u32,
     pub cars: u32,
+    pub res_occupants: u32,
+    pub office_occupants: u32,
+    pub shop_occupants: u32,
     pub residential: u32,
     pub offices: u32,
     pub shops: u32,

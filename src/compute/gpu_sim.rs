@@ -935,6 +935,9 @@ pub fn apply_gpu_readback(
         while let Ok(stats) = rx.try_recv() {
             counters.people = stats.people_count;
             counters.cars = stats.travelling_count;
+            counters.res_occupants = stats.residential_occupancy;
+            counters.office_occupants = stats.office_occupancy;
+            counters.shop_occupants = stats.shop_occupancy;
             counters.residential = stats.residential_count;
             counters.offices = stats.office_count;
             counters.shops = stats.shop_count_b;
