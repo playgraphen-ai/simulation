@@ -569,6 +569,9 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
     var path_cursor = texel1.w;
 
     if activity == ACT_HOME || activity == ACT_WORK || activity == ACT_SHOP {
+        let logic_dt = params.dt * f32(params.cycle_frames);
+        activity_time = activity_time - logic_dt;
+
         if activity_time <= 0.0 {
             // Activity done — pick next destination and apply economy.
             var current_building: u32 = 0u;
