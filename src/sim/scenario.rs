@@ -54,85 +54,129 @@ pub fn build_starter_scenario(
     let mid_gy = grid_size_y / 2;
 
     for &(start_x, start_y) in &offsets {
-        // 1. Build the grid of roads
-        // Horizontal roads
-        for gy in 0..=grid_size_y {
-            let y = start_y + gy * block_size;
-            let mut prev = None;
-            
-            // For the middle horizontal road, extend it slightly to the left as an entry point
-            let row_start_x = if gy == mid_gy { start_x.saturating_sub(10) } else { start_x };
-            let row_end_x = start_x + grid_size_x * block_size;
+    // 1. Build the grid of roads
+    // Horizontal roads
+    for gy in 0..=grid_size_y {
+        let y = start_y + gy * block_size;
+        let mut prev = None;
+        
+        // For the middle horizontal road, extend it slightly to the left as an entry point
+        let row_start_x = if gy == mid_gy { start_x.saturating_sub(10) } else { start_x };
+        let row_end_x = start_x + grid_size_x * block_size;
 
-            for x in row_start_x..=row_end_x {
-                if grid.get(x, y) == Some(Tile::Water) {
-                    prev = None; // break the road
-                    continue;
-                }
-                let here = (x, y);
-                if let Some(other) = prev {
-                    roads.push_link(here, other, RoadType::Normal);
-                } else {
-                    roads.push_link(here, here, RoadType::Normal);
-                }
-                prev = Some(here);
+        for x in row_start_x..=row_end_x {
+            if grid.get(x, y) == Some(Tile::Water) {
+                prev = None; // break the road
+                continue;
+            }
+            let here = (x, y);
+            if let Some(other) = prev {
+                roads.push_link(here, other, RoadType::Normal);
+            } else {
+                roads.push_link(here, here, RoadType::Normal);
+            }
+            prev = Some(here);
+        }
+    }
+    // Vertical roads
+    for gx in 0..=grid_size_x {
+        let x = start_x + gx * block_size;
+        let mut prev = None;
+        for y in start_y..=(start_y + grid_size_y * block_size) {
+            if grid.get(x, y) == Some(Tile::Water) {
+                prev = None;
+                continue;
+            }
+            let here = (x, y);
+            if let Some(other) = prev {
+                roads.push_link(here, other, RoadType::Normal);
+            } else {
+                roads.push_link(here, here, RoadType::Normal);
+            }
+            prev = Some(here);
+        }
+    }
+}
+
+let city_w = grid_size_x * block_size;
+let city_h = grid_size_y * block_size;
+let mid_ox = (grid_size_x / 2) * block_size;
+let mid_oy = mid_gy * block_size;
+
+let gap_w = spacing - city_w;
+let gap_h = spacing - city_h;
+
+let x_min = offsets[0].0.saturating_sub(20);
+let x_max = offsets[63].0 + city_w + 20;
+let y_min = offsets[0].1.saturating_sub(20);
+let y_max = offsets[63].1 + city_h + 20;
+
+// Continuous highways
+for i in 0..7 {
+    // Vertical
+    let hx = offsets[0].0 + i * spacing + city_w + gap_w / 2;
+    for y in y_min..=y_max {
+        roads.push_link((hx, y), (hx, y.saturating_sub(1).max(y_min)), RoadType::Highway);
+    }
+    
+    // Horizontal
+    let hy = offsets[0].1 + i * spacing + city_h + gap_h / 2;
+    for x in x_min..=x_max {
+        roads.push_link((x, hy), (x.saturating_sub(1).max(x_min), hy), RoadType::Highway);
+    }
+}
+
+// Connect the 64 cities to the highways
+for cy in 0..8 {
+    for cx in 0..8 {
+        let idx = (cy * 8 + cx) as usize;
+        let current = offsets[idx];
+        
+        // Connect Right to vertical highway
+        if cx < 7 {
+            let hx = current.0 + city_w + gap_w / 2;
+            let x_start = current.0 + city_w;
+            let y = current.1 + mid_oy;
+            for x in x_start..=hx {
+                roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y), RoadType::Highway);
             }
         }
-        // Vertical roads
-        for gx in 0..=grid_size_x {
-            let x = start_x + gx * block_size;
-            let mut prev = None;
-            for y in start_y..=(start_y + grid_size_y * block_size) {
-                if grid.get(x, y) == Some(Tile::Water) {
-                    prev = None;
-                    continue;
-                }
-                let here = (x, y);
-                if let Some(other) = prev {
-                    roads.push_link(here, other, RoadType::Normal);
-                } else {
-                    roads.push_link(here, here, RoadType::Normal);
-                }
-                prev = Some(here);
+        
+        // Connect Left to vertical highway
+        if cx > 0 {
+            let hx = current.0 - gap_w / 2;
+            let x_start = hx;
+            let x_end = current.0;
+            let y = current.1 + mid_oy;
+            for x in x_start..=x_end {
+                roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y), RoadType::Highway);
+            }
+        }
+
+        // Connect Down to horizontal highway
+        if cy < 7 {
+            let hy = current.1 + city_h + gap_h / 2;
+            let y_start = current.1 + city_h;
+            let x = current.0 + mid_ox;
+            for y in y_start..=hy {
+                roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)), RoadType::Highway);
+            }
+        }
+        
+        // Connect Up to horizontal highway
+        if cy > 0 {
+            let hy = current.1 - gap_h / 2;
+            let y_start = hy;
+            let y_end = current.1;
+            let x = current.0 + mid_ox;
+            for y in y_start..=y_end {
+                roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)), RoadType::Highway);
             }
         }
     }
+}
 
-    // Connect the 64 cities with single roads
-    for cy in 0..8 {
-        for cx in 0..8 {
-            let idx = (cy * 8 + cx) as usize;
-            let current = offsets[idx];
-            let city_w = grid_size_x * block_size;
-            let city_h = grid_size_y * block_size;
-            let mid_ox = (grid_size_x / 2) * block_size;
-            let mid_oy = mid_gy * block_size;
-
-            // Connect right (if cx < 7)
-            if cx < 7 {
-                let right = offsets[idx + 1];
-                let x_start = current.0 + city_w;
-                let x_end = right.0;
-                let y = current.1 + mid_oy;
-                for x in x_start..=x_end {
-                    roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y), RoadType::Highway);
-                }
-            }
-
-            // Connect down (if cy < 7)
-            if cy < 7 {
-                let down = offsets[idx + 8];
-                let y_start = current.1 + city_h;
-                let y_end = down.1;
-                let x = current.0 + mid_ox;
-                for y in y_start..=y_end {
-                    roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)), RoadType::Highway);
-                }
-            }
-        }
-    }
-
-    let tile_to_seg = roads.rebuild_topology();
+let tile_to_seg = roads.rebuild_topology();
     let mut entry_seg = 0;
     
     let entry_x = offsets[0].0.saturating_sub(10);
