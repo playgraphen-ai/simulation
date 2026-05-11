@@ -67,8 +67,8 @@ struct GpuStats {
     shop_count_b: atomic<u32>,
     residential_assigned: atomic<u32>,
     office_assigned: atomic<u32>,
-    _pad0: u32,
-    _pad1: u32,
+    bankrupt_count: atomic<u32>,
+    _pad: u32,
 };
 
 @group(0) @binding(0) var people_tex: texture_storage_2d<rgba32float, read_write>;
@@ -116,6 +116,12 @@ const ACT_HOME:   f32 = 1.0;
 const ACT_WORK:   f32 = 2.0;
 const ACT_SHOP:   f32 = 3.0;
 const ACT_ARRIVED: f32 = 4.0;
+
+fn pcg_hash(seed: u32) -> u32 {
+    var state = seed * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
 
 fn rand(state: ptr<function, u32>) -> f32 {
     var x = *state;
@@ -724,18 +730,6 @@ fn main_buildings(@builtin(global_invocation_id) gid: vec3<u32>) {
     let assigned = f32(atomicLoad(&building_stats[bid * 2u + 1u]));
 
     let btype = tex0.z;
-    if (btype == 0.0) {
-        atomicAdd(&stats.residential_count, 1u);
-        atomicAdd(&stats.residential_occupancy, u32(occupants));
-        atomicAdd(&stats.residential_assigned, u32(assigned));
-    } else if (btype == 1.0) {
-        atomicAdd(&stats.office_count, 1u);
-        atomicAdd(&stats.office_occupancy, u32(occupants));
-        atomicAdd(&stats.office_assigned, u32(assigned));
-    } else if (btype == 2.0) {
-        atomicAdd(&stats.shop_count_b, 1u);
-        atomicAdd(&stats.shop_occupancy, u32(occupants));
-    }
 
     var level = tex0.w;
     var capacity = tex1.z;
@@ -793,6 +787,7 @@ fn main_recount_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
     var s_count = 0u;
     var t_count = 0u;
     var total_money = 0u;
+    var bankrupt = 0u;
 
     for (var i = 0u; i < 1000u; i = i + 1u) {
         let pid = start_pid + i;
@@ -816,7 +811,9 @@ fn main_recount_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
         else if activity == ACT_TRAVEL { t_count = t_count + 1u; }
         else if activity == ACT_ARRIVED { t_count = t_count + 1u; }
         
-        total_money = total_money + u32(max(0.0, tex0.x));
+        let money = tex0.x;
+        total_money = total_money + u32(max(0.0, money));
+        if money <= 0.0 { bankrupt = bankrupt + 1u; }
 
         if home != 0xFFFFFFFFu {
             atomicAdd(&building_stats[home * 2u + 1u], 1u);

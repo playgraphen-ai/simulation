@@ -92,6 +92,12 @@ fn road_coords(sid: u32) -> array<vec2<i32>, 5> {
     return array<vec2<i32>, 5>(c0, c1, c2, c3, c4);
 }
 
+fn pcg_hash(seed: u32) -> u32 {
+    var state = seed * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
 fn rand(state: ptr<function, u32>) -> f32 {
     var x = *state;
     x ^= x << 13u;
@@ -107,7 +113,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if request_idx >= params.spawn_count { return; }
 
     let pid = params.spawn_start_index + request_idx;
-    var rng_state = params.rng_seed + pid + 777u;
+    var rng_state = pcg_hash(params.rng_seed + pid + 777u);
 
     // 1. Find Home (Residential)
     var home_id = 0u;

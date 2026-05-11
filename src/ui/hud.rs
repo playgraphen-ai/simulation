@@ -41,9 +41,9 @@ pub fn update_hud(
 
     text.0 = format!(
         "Time: Day {}, {:02}:{:02} (Real: {:02}:{:02})\n\
-        People: {}\nTravelling (Cars): {}\nAt Home: {}\nAt Work: {}\nShopping: {}\nResidential: {}\nOffice: {}\nShop: {}\nRoads: {}\nAbandoned: {}",
+        People: {} (Bankrupt: {})\nTravelling (Cars): {}\nAt Home: {}\nAt Work: {}\nShopping: {}\nResidential: {}\nOffice: {}\nShop: {}\nRoads: {}\nAbandoned: {}",
         d, h, m, real_m, real_s,
-        counters.people,
+        counters.people, counters.bankrupt,
         counters.cars,
         counters.res_occupants,
         counters.office_occupants,

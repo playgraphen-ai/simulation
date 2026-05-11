@@ -145,7 +145,8 @@ pub struct GpuStats {
     pub shop_count_b: u32,
     pub residential_assigned: u32,
     pub office_assigned: u32,
-    pub _pad: [u32; 2],
+    pub bankrupt_count: u32,
+    pub _pad: u32,
 }
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -999,12 +1000,7 @@ pub fn apply_gpu_readback(
         while let Ok(stats) = rx.try_recv() {
             counters.people = stats.people_count;
             counters.cars = stats.travelling_count;
-            counters.res_occupants = stats.residential_occupancy;
-            counters.office_occupants = stats.office_occupancy;
-            counters.shop_occupants = stats.shop_occupancy;
-            counters.residential = stats.residential_count;
-            counters.offices = stats.office_count;
-            counters.shops = stats.shop_count_b;
+            counters.bankrupt = stats.bankrupt_count;
             // Optionally update more counters here if needed
         }
     }
