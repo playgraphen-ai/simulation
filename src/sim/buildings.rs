@@ -3,7 +3,7 @@
 //! Each building = 3 RGBA32F texels (12 floats).
 //! Texel 0: [x, y, btype, level]
 //! Texel 1: [income_or_rent, occupants, capacity, road_segment_id]
-//! Texel 2: [growth, age_seconds, _pad0, _pad1]
+//! Texel 2: [growth, age_seconds, road_t, assigned]
 //!
 //! btype: 0=Residential, 1=Office, 2=Shop.
 //! level: 0..4 (five visual stages from undeveloped to dense).
@@ -31,7 +31,7 @@ pub struct BuildingRow {
     pub growth: f32,
     pub age_seconds: f32,
     pub road_t: f32,
-    pub _pad1: f32,
+    pub assigned: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -40,6 +40,7 @@ pub struct Building {
     pub btype: ZoneType,
     pub level: u32,
     pub occupants: u32,
+    pub assigned: u32,
     pub capacity: u32,
     pub income: f32,
     pub road_seg: u32,
@@ -111,7 +112,7 @@ impl BuildingData {
             growth: b.growth,
             age_seconds: b.age_seconds,
             road_t: b.road_t,
-            _pad1: 0.0,
+            assigned: b.assigned as f32,
         };
     }
 }
@@ -170,6 +171,7 @@ pub fn spawn_building(
         btype,
         level,
         occupants: 0,
+        assigned: 0,
         capacity: capacity_for(btype, level),
         income: income_for(btype, level),
         road_seg,

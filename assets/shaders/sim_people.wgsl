@@ -26,7 +26,7 @@ struct SimParams {
     r_start: u32,
     r_count: u32,
     cycle_frames: u32,
-    do_readback: u32,
+    do_stats_readback: u32,
     reset_stats: u32,
     grid_w: u32,
     grid_h: u32,
@@ -65,10 +65,10 @@ struct GpuStats {
     residential_count: atomic<u32>,
     office_count: atomic<u32>,
     shop_count_b: atomic<u32>,
+    residential_assigned: atomic<u32>,
+    office_assigned: atomic<u32>,
     _pad0: u32,
     _pad1: u32,
-    _pad2: u32,
-    _pad3: u32,
 };
 
 @group(0) @binding(0) var people_tex: texture_storage_2d<rgba32float, read_write>;
@@ -80,6 +80,7 @@ struct GpuStats {
 @group(0) @binding(6) var<storage, read_write> congestion: array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> stats: GpuStats;
 @group(0) @binding(8) var<storage, read_write> occupancy: array<atomic<u32>>;
+@group(0) @binding(9) var<storage, read_write> building_stats: array<atomic<u32>>; // occupants: idx*2, assigned: idx*2+1
 
 fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
     let base = i32(pid * 3u);
@@ -414,11 +415,9 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                         current_seg = f32(next_path_seg);
                     } else {
                         // Arrived!
-                        let dest_b_coords = building_coords(u32(destination));
-                        var b_tex1 = textureLoad(buildings_tex, dest_b_coords[1]);
+                        let dest_bid = u32(destination);
+                        // atomicAdd(&building_stats[dest_bid * 2u], 1u); // Increment physical occupants
 
-                        b_tex1.y = b_tex1.y + 1.0;
-                        textureStore(buildings_tex, dest_b_coords[1], b_tex1);
                         path_cursor = 0.0;
                         activity = ACT_ARRIVED;
                         activity_time = stop_at;
@@ -432,10 +431,8 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 activity = ACT_HOME;
                 activity_time = params.home_duration;
                 destination = home;
-                let h_coords = building_coords(u32(home));
-                var h_tex1 = textureLoad(buildings_tex, h_coords[1]);
-                h_tex1.y = h_tex1.y + 1.0;
-                textureStore(buildings_tex, h_coords[1], h_tex1);
+                let h_bid = u32(home);
+                // atomicAdd(&building_stats[h_bid * 2u], 1u); // Increment physical occupants
             }
         }
     } else if activity == ACT_ARRIVED {
@@ -474,26 +471,56 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
     var texel2 = textureLoad(people_tex, coords[2]);
 
     // Statistics
-    atomicAdd(&stats.people_count, 1u);
+    // atomicAdd(&stats.people_count, 1u);
     let current_activity = texel1.y;
-    if (current_activity == ACT_HOME) { atomicAdd(&stats.home_count, 1u); }
-    else if (current_activity == ACT_WORK) { atomicAdd(&stats.work_count, 1u); }
-    else if (current_activity == ACT_SHOP) { atomicAdd(&stats.shop_count, 1u); }
-    else if (current_activity == ACT_TRAVEL) { atomicAdd(&stats.travelling_count, 1u); }
-    atomicAdd(&stats.total_money, u32(max(0.0, texel0.x)));
+    // if (current_activity == ACT_HOME) { atomicAdd(&stats.home_count, 1u); }
+    // else if (current_activity == ACT_WORK) { atomicAdd(&stats.work_count, 1u); }
+    // else if (current_activity == ACT_SHOP) { atomicAdd(&stats.shop_count, 1u); }
+    // else if (current_activity == ACT_TRAVEL) { atomicAdd(&stats.travelling_count, 1u); }
+    // atomicAdd(&stats.total_money, u32(max(0.0, texel0.x)));
 
     var money = texel0.x;
     var rng_state = params.rng_seed + pid + 777u;
 
     if money == 0.0 && params.buildings_count > 0u {
+        // --- RELEASE OLD BUILDINGS ---
+        let old_home = u32(texel0.w);
+        let old_work = u32(texel1.x);
+        /*
+        if old_home != 0xFFFFFFFFu {
+            atomicSub(&building_stats[old_home * 2u + 1u], 1u); // Release assigned
+
+            // Also release physical occupancy if they were there
+            if current_activity == ACT_HOME || (current_activity == ACT_ARRIVED && u32(texel0.z) == old_home) {
+                atomicSub(&building_stats[old_home * 2u], 1u);
+            }
+        }
+        if old_work != 0xFFFFFFFFu && old_work != old_home {
+            atomicSub(&building_stats[old_work * 2u + 1u], 1u); // Release assigned
+
+            // Also release physical occupancy if they were there
+            if current_activity == ACT_WORK || (current_activity == ACT_ARRIVED && u32(texel0.z) == old_work) {
+                atomicSub(&building_stats[old_work * 2u], 1u);
+            }
+        }
+        if current_activity == ACT_SHOP || (current_activity == ACT_ARRIVED && u32(texel0.z) != old_home && u32(texel0.z) != old_work) {
+            let shop_id = u32(texel0.z);
+            if shop_id != 0xFFFFFFFFu {
+                atomicSub(&building_stats[shop_id * 2u], 1u); // Release physical
+            }
+        }
+        */
+
         var home_id = 0u;
         var found_home = false;
         for (var i = 0u; i < 20u; i = i + 1u) {
             let bid = u32(rand(&rng_state) * f32(params.buildings_count));
             let b_coords = building_coords(bid);
             let b_tex0 = textureLoad(buildings_tex, b_coords[0]);
-            var b_tex1 = textureLoad(buildings_tex, b_coords[1]);
-            if b_tex0.z == 0.0 && b_tex1.y < b_tex1.z { // Residential and has space
+            let b_tex1 = textureLoad(buildings_tex, b_coords[1]);
+            
+            let assigned_at = atomicLoad(&building_stats[bid * 2u + 1u]);
+            if b_tex0.z == 0.0 && f32(assigned_at) < b_tex1.z { // Residential and has space
                 let home_seg = u32(b_tex1.w);
                 let r_coords = road_coords(home_seg);
                 let r_tex1 = textureLoad(roads_tex, r_coords[1]);
@@ -501,8 +528,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
                 home_id = bid;
                 found_home = true;
-                b_tex1.y = b_tex1.y + 1.0;
-                textureStore(buildings_tex, b_coords[1], b_tex1);
+                // atomicAdd(&building_stats[bid * 2u + 1u], 1u); // Increment assigned
                 break;
             }
         }
@@ -514,8 +540,11 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let b_coords = building_coords(bid);
                 let b_tex0 = textureLoad(buildings_tex, b_coords[0]);
                 let b_tex1 = textureLoad(buildings_tex, b_coords[1]);
-                if b_tex0.z == 1.0 && b_tex1.y < b_tex1.z { // Office and has space
+
+                let assigned_at = atomicLoad(&building_stats[bid * 2u + 1u]);
+                if b_tex0.z == 1.0 && f32(assigned_at) < b_tex1.z { // Office and has space
                     work_id = bid;
+                    // atomicAdd(&building_stats[bid * 2u + 1u], 1u); // Increment assigned
                     break;
                 }
             }
@@ -585,12 +614,12 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
                 current_building = u32(destination);
             }
 
-            // Release building occupancy
+            // Release building occupancy (Physically leaving)
+            // atomicSub(&building_stats[current_building * 2u], 1u);
+
             let current_b_coords = building_coords(current_building);
-            var current_b_tex1 = textureLoad(buildings_tex, current_b_coords[1]);
+            let current_b_tex1 = textureLoad(buildings_tex, current_b_coords[1]);
             let current_b_tex2 = textureLoad(buildings_tex, current_b_coords[2]);
-            current_b_tex1.y = max(0.0, current_b_tex1.y - 1.0);
-            textureStore(buildings_tex, current_b_coords[1], current_b_tex1);
             let start_seg = u32(current_b_tex1.w); // road_seg is tex1.w
             let start_t = current_b_tex2.z;
 
@@ -640,9 +669,8 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let start_r_tex1 = textureLoad(roads_tex, start_r_coords[1]);
             if start_r_tex1.x <= 0.15 {
                 // Wait for space
-                // Revert building occupancy
-                current_b_tex1.y = current_b_tex1.y + 1.0;
-                textureStore(buildings_tex, current_b_coords[1], current_b_tex1);
+                // Revert building occupancy (did not leave yet)
+                atomicAdd(&building_stats[current_building * 2u], 1u);
                 return;
             }
 
@@ -691,21 +719,25 @@ fn main_buildings(@builtin(global_invocation_id) gid: vec3<u32>) {
     var tex1 = textureLoad(buildings_tex, coords[1]);
     var tex2 = textureLoad(buildings_tex, coords[2]);
 
+    // Read atomic values
+    let occupants = f32(atomicLoad(&building_stats[bid * 2u]));
+    let assigned = f32(atomicLoad(&building_stats[bid * 2u + 1u]));
+
     let btype = tex0.z;
-    let occupancy = tex1.y;
     if (btype == 0.0) {
         atomicAdd(&stats.residential_count, 1u);
-        atomicAdd(&stats.residential_occupancy, u32(occupancy));
+        atomicAdd(&stats.residential_occupancy, u32(occupants));
+        atomicAdd(&stats.residential_assigned, u32(assigned));
     } else if (btype == 1.0) {
         atomicAdd(&stats.office_count, 1u);
-        atomicAdd(&stats.office_occupancy, u32(occupancy));
+        atomicAdd(&stats.office_occupancy, u32(occupants));
+        atomicAdd(&stats.office_assigned, u32(assigned));
     } else if (btype == 2.0) {
         atomicAdd(&stats.shop_count_b, 1u);
-        atomicAdd(&stats.shop_occupancy, u32(occupancy));
+        atomicAdd(&stats.shop_occupancy, u32(occupants));
     }
 
     var level = tex0.w;
-    var occupants = tex1.y;
     var capacity = tex1.z;
 
     var growth = tex2.x;
@@ -716,7 +748,7 @@ fn main_buildings(@builtin(global_invocation_id) gid: vec3<u32>) {
     let logic_dt = params.dt * f32(params.cycle_frames);
     age_seconds = age_seconds + logic_dt;
 
-    let fill = occupants / max(1.0, capacity);
+    let fill = assigned / max(1.0, capacity);
 
     if fill > 0.7 && level < 4.0 {
         growth = growth + (0.1 * logic_dt);
@@ -734,7 +766,6 @@ fn main_buildings(@builtin(global_invocation_id) gid: vec3<u32>) {
         if growth <= -1.0 {
             capacity = 0.0;
             tex1.z = 0.0;
-            occupants = 0.0;
         }
     } else {
         growth = min(0.0, max(-1.0, growth + (0.01 * logic_dt)));
@@ -744,8 +775,71 @@ fn main_buildings(@builtin(global_invocation_id) gid: vec3<u32>) {
     tex1.y = occupants;
     tex2.x = growth;
     tex2.y = age_seconds;
+    tex2.w = assigned;
 
     textureStore(buildings_tex, coords[0], tex0);
     textureStore(buildings_tex, coords[1], tex1);
     textureStore(buildings_tex, coords[2], tex2);
+}
+
+@compute @workgroup_size(64)
+fn main_recount_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let start_pid = gid.x * 1000u;
+    if start_pid >= params.people_count { return; }
+
+    var p_count = 0u;
+    var h_count = 0u;
+    var w_count = 0u;
+    var s_count = 0u;
+    var t_count = 0u;
+    var total_money = 0u;
+
+    for (var i = 0u; i < 1000u; i = i + 1u) {
+        let pid = start_pid + i;
+        if pid >= params.people_count { break; }
+
+        let coords = person_coords(pid);
+        let tex0 = textureLoad(people_tex, coords[0]);
+        let tex1 = textureLoad(people_tex, coords[1]);
+
+        let home = u32(tex0.w);
+        let work = u32(tex1.x);
+        let dest = u32(tex0.z);
+
+        if home == 0xFFFFFFFFu && work == 0xFFFFFFFFu { continue; } // Not spawned
+
+        p_count = p_count + 1u;
+        let activity = tex1.y;
+        if activity == ACT_HOME { h_count = h_count + 1u; }
+        else if activity == ACT_WORK { w_count = w_count + 1u; }
+        else if activity == ACT_SHOP { s_count = s_count + 1u; }
+        else if activity == ACT_TRAVEL { t_count = t_count + 1u; }
+        else if activity == ACT_ARRIVED { t_count = t_count + 1u; }
+        
+        total_money = total_money + u32(max(0.0, tex0.x));
+
+        if home != 0xFFFFFFFFu {
+            atomicAdd(&building_stats[home * 2u + 1u], 1u);
+        }
+        if work != 0xFFFFFFFFu && work != home {
+            atomicAdd(&building_stats[work * 2u + 1u], 1u);
+        }
+
+        if activity == ACT_HOME {
+            if home != 0xFFFFFFFFu { atomicAdd(&building_stats[home * 2u], 1u); }
+        } else if activity == ACT_WORK {
+            if work != 0xFFFFFFFFu { atomicAdd(&building_stats[work * 2u], 1u); }
+        } else if activity == ACT_SHOP {
+            if dest != 0xFFFFFFFFu { atomicAdd(&building_stats[dest * 2u], 1u); }
+        } else if activity == ACT_ARRIVED {
+            if dest != 0xFFFFFFFFu { atomicAdd(&building_stats[dest * 2u], 1u); }
+        }
+    }
+
+    atomicAdd(&stats.people_count, p_count);
+    atomicAdd(&stats.home_count, h_count);
+    atomicAdd(&stats.work_count, w_count);
+    atomicAdd(&stats.shop_count, s_count);
+    atomicAdd(&stats.travelling_count, t_count);
+    atomicAdd(&stats.total_money, total_money);
 }

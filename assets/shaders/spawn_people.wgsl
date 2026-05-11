@@ -207,7 +207,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let activity_time = rand(&rng_state) * params.home_duration;
     
     let texel0 = vec4<f32>(money, time_since_rent, f32(home_id), f32(home_id));
-    let texel1 = vec4<f32>(f32(home_id), 1.0, activity_time, 0.0);
+    let texel1 = vec4<f32>(f32(work_id), 1.0, activity_time, 0.0);
     let texel2 = vec4<f32>(f32(start_seg), f32(start_seg), start_t, start_t);
 
     textureStore(people_tex, p_coords[0], texel0);

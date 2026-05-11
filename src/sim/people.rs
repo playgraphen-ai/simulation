@@ -38,9 +38,9 @@ impl Default for PersonRow {
         Self {
             money: 0.0,
             age: 0.0,
-            destination: 0.0,
-            home: 0.0,
-            work: 0.0,
+            destination: 0xFFFFFFFFu32 as f32,
+            home: 0xFFFFFFFFu32 as f32,
+            work: 0xFFFFFFFFu32 as f32,
             activity_code: 0.0,
             activity_time: 0.0,
             path_cursor: 0.0,

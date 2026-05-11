@@ -161,8 +161,8 @@ pub fn update_inspector_ui(
             if let Some(b) = buildings.items.get(bid as usize) {
                 let status = if b.capacity == 0 { "ABANDONED" } else { "ACTIVE" };
                 text.0 = format!(
-                    "--- BUILDING {} ---\nStatus: {}\nType: {:?}\nLevel: {}\nOccupants: {} / {}\nIncome: {:.1}\nGrowth: {:.3}\nAge: {:.0}s",
-                    bid, status, b.btype, b.level, b.occupants, b.capacity, b.income, b.growth, b.age_seconds
+                    "--- BUILDING {} ---\nStatus: {}\nType: {:?}\nLevel: {}\nOccupants: {} (Phys)\nAssigned: {} / {}\nIncome: {:.1}\nGrowth: {:.3}\nAge: {:.0}s",
+                    bid, status, b.btype, b.level, b.occupants, b.assigned, b.capacity, b.income, b.growth, b.age_seconds
                 );
             } else {
                 text.0 = "Building destroyed".to_string();
@@ -178,9 +178,13 @@ pub fn update_inspector_ui(
                     3 => "Shopping",
                     _ => "Unknown",
                 };
+                let h_id = if r.home as u32 == 0xFFFFFFFF { "None".to_string() } else { (r.home as u32).to_string() };
+                let w_id = if r.work as u32 == 0xFFFFFFFF { "None".to_string() } else { (r.work as u32).to_string() };
+                let d_id = if r.destination as u32 == 0xFFFFFFFF { "None".to_string() } else { (r.destination as u32).to_string() };
+                
                 text.0 = format!(
                     "--- PERSON {} ---\nAge: {:.0}\nMoney: ${:.0}\nHome ID: {}\nWork ID: {}\nDest ID: {}\nActivity: {}\nTime left: {:.1}s",
-                    pid, r.age, r.money, r.home as u32, r.work as u32, r.destination as u32, act, r.activity_time
+                    pid, r.age, r.money, h_id, w_id, d_id, act, r.activity_time
                 );
             }
         }
