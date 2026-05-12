@@ -62,8 +62,12 @@ pub fn paint_tick_system(
                 }
             }
         }
-        ActiveTool::Road | ActiveTool::Highway => {
-            let rtype = if *active == ActiveTool::Highway { RoadType::Highway } else { RoadType::Normal };
+        ActiveTool::Road | ActiveTool::Highway | ActiveTool::Highway2x4 => {
+            let rtype = match *active {
+                ActiveTool::Highway => RoadType::Highway,
+                ActiveTool::Highway2x4 => RoadType::Highway2x4,
+                _ => RoadType::Normal,
+            };
             if matches!(grid.get(x, y), Some(Tile::Empty) | Some(Tile::Zone(_))) {
                 // Create a road link between this tile and any adjacent road tile of SAME TYPE.
                 for (nx, ny) in grid.neighbours4(x, y) {
@@ -81,23 +85,37 @@ pub fn paint_tick_system(
                 // Update the grid with the new super-segment IDs
                 for ((tx, ty), seg_id) in tile_to_seg {
                     let rtype = roads.segments[seg_id as usize].road_type;
-                    if rtype == RoadType::Highway {
-                        for dx in -1..=2 {
-                            for dy in -1..=2 {
-                                let nx = tx as i32 + dx;
-                                let ny = ty as i32 + dy;
-                                if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {
-                                    grid.set(nx as u32, ny as u32, Tile::Road(seg_id));
+                    match rtype {
+                        RoadType::Highway2x4 => {
+                            for dx in -2..=3 {
+                                for dy in -2..=3 {
+                                    let nx = tx as i32 + dx;
+                                    let ny = ty as i32 + dy;
+                                    if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {
+                                        grid.set(nx as u32, ny as u32, Tile::Road(seg_id));
+                                    }
                                 }
                             }
                         }
-                    } else {
-                        for dx in 0..=1 {
-                            for dy in 0..=1 {
-                                let nx = tx as u32 + dx;
-                                let ny = ty as u32 + dy;
-                                if nx < grid.width && ny < grid.height {
-                                    grid.set(nx, ny, Tile::Road(seg_id));
+                        RoadType::Highway => {
+                            for dx in -1..=2 {
+                                for dy in -1..=2 {
+                                    let nx = tx as i32 + dx;
+                                    let ny = ty as i32 + dy;
+                                    if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {
+                                        grid.set(nx as u32, ny as u32, Tile::Road(seg_id));
+                                    }
+                                }
+                            }
+                        }
+                        RoadType::Normal => {
+                            for dx in 0..=1 {
+                                for dy in 0..=1 {
+                                    let nx = tx as u32 + dx;
+                                    let ny = ty as u32 + dy;
+                                    if nx < grid.width && ny < grid.height {
+                                        grid.set(nx, ny, Tile::Road(seg_id));
+                                    }
                                 }
                             }
                         }
@@ -105,7 +123,11 @@ pub fn paint_tick_system(
                     
                     // Materialize adjacent zoned tiles as buildings.
                     // Check a radius large enough for 4x4.
-                    let search_radius = if rtype == RoadType::Highway { 6 } else { 4 };
+                    let search_radius = match rtype {
+                        RoadType::Highway2x4 => 8,
+                        RoadType::Highway => 6,
+                        RoadType::Normal => 4,
+                    };
                     for ox in -search_radius..=search_radius {
                         for oy in -search_radius..=search_radius {
                             let nx = tx as i32 + ox;

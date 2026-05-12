@@ -55,7 +55,8 @@ fn fragment(
     let splat_dim = textureDimensions(splat_texture);
     let splat_coord = clamp(vec2<i32>(floor(pos)), vec2<i32>(0), vec2<i32>(splat_dim) - vec2<i32>(1));
     // On utilise textureLoad pour une lecture brute sans interpolation (pixel perfect)
-    let road_mask = textureLoad(splat_texture, splat_coord, 0).r;
+    let road_id_f = textureLoad(splat_texture, splat_coord, 0).r;
+    let road_id = i32(road_id_f * 255.0 + 0.5);
     
     // Échantillonnage de la texture d'herbe
     // On augmente la fréquence pour que l'herbe soit détaillée à l'échelle d'une voiture
@@ -82,12 +83,41 @@ fn fragment(
     // Couleur de la route (Gris foncé bitume)
     // On ajoute un peu de bruit de détail sur la route pour qu'elle ne soit pas plate
     let road_noise = n_detail * 0.05;
-    let road_color = vec3<f32>(0.15, 0.15, 0.17) + road_noise;
+    var road_color = vec3<f32>(0.15, 0.15, 0.17) + road_noise;
     
-    // On peut aussi ajouter un petit liseré ou une transition si on veut, 
-    // mais ici on va rester sur du net pour le côté "case".
+    // Marquages au sol pour les autoroutes
+    if (road_id == 2) { // Highway
+        let local_pos = fract(pos);
+        // Ligne blanche discontinue sur les bords ou milieu ?
+        // Ici on va faire une ligne blanche sur les bords des cases 2x2
+        let is_edge = local_pos.x < 0.05 || local_pos.x > 0.95 || local_pos.y < 0.05 || local_pos.y > 0.95;
+        if (is_edge) {
+            road_color += vec3<f32>(0.1, 0.1, 0.1);
+        }
+    } else if (road_id == 3) { // Highway 2x4
+        let local_pos = fract(pos);
+        road_color = vec3<f32>(0.12, 0.12, 0.14) + road_noise; // Un peu plus sombre
+        
+        // Lignes jaunes doubles au milieu d'une des cases
+        let dist_x = abs(local_pos.x - 0.5);
+        let dist_y = abs(local_pos.y - 0.5);
+        if ((dist_x < 0.03 && dist_x > 0.01) || (dist_y < 0.03 && dist_y > 0.01)) {
+            road_color = vec3<f32>(0.8, 0.6, 0.1);
+        }
+        
+        // Lignes blanches pointillées pour les voies
+        let lane_x = fract(pos.x * 2.0);
+        let lane_y = fract(pos.y * 2.0);
+        let dash = fract(pos.x * 0.5) > 0.5 || fract(pos.y * 0.5) > 0.5;
+        if ((abs(lane_x - 0.5) < 0.01 || abs(lane_y - 0.5) < 0.01) && dash) {
+            road_color = vec3<f32>(0.7, 0.7, 0.7);
+        }
+    }
+
     // On mix la route au dessus du terrain
-    final_color = mix(final_color, road_color, road_mask);
+    if (road_id > 0) {
+        final_color = road_color;
+    }
 
     // Output final
     return vec4<f32>(final_color, 1.0);

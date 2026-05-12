@@ -21,6 +21,7 @@ pub enum RoadType {
     #[default]
     Normal,
     Highway,
+    Highway2x4,
 }
 
 pub const ROAD_CAPACITY: u32 = 8192;
@@ -50,7 +51,7 @@ pub struct RoadRow {
     pub conn_b2: f32,
     pub count_b: f32,
     // Texel 4: Extra metadata
-    pub road_type: f32, // 0 for Normal, 1 for Highway
+    pub road_type: f32, // 0 for Normal, 1 for Highway, 2 for Highway2x4
     pub major_id: f32,  // ID in the major graph, or -1.0
     pub unused2: f32,
     pub unused3: f32,
@@ -212,7 +213,11 @@ impl RoadData {
                         points: path,
                         conn_a: Vec::new(),
                         conn_b: Vec::new(),
-                        speed_mean: if rtype == RoadType::Highway { 4.0 } else { 1.0 },
+                        speed_mean: match rtype {
+                            RoadType::Normal => 1.0,
+                            RoadType::Highway => 4.0,
+                            RoadType::Highway2x4 => 8.0,
+                        },
                         length,
                         links_offset: 0,
                         road_type: rtype,
@@ -256,7 +261,11 @@ impl RoadData {
                 points: path,
                 conn_a: Vec::new(),
                 conn_b: Vec::new(),
-                speed_mean: if rtype == RoadType::Highway { 4.0 } else { 1.0 },
+                speed_mean: match rtype {
+                    RoadType::Normal => 1.0,
+                    RoadType::Highway => 4.0,
+                    RoadType::Highway2x4 => 8.0,
+                },
                 length,
                 links_offset: 0,
                 road_type: rtype,
@@ -313,7 +322,7 @@ impl RoadData {
         self.major_rows.clear();
         let mut original_to_major = std::collections::HashMap::new();
         for (id, seg) in self.segments.iter().enumerate() {
-            if seg.road_type == RoadType::Highway {
+            if seg.road_type == RoadType::Highway || seg.road_type == RoadType::Highway2x4 {
                 let major_id = self.major_rows.len() as u32;
                 original_to_major.insert(id as u32, major_id);
                 self.major_rows.push(MajorRoadRow {
@@ -403,6 +412,7 @@ impl RoadData {
             road_type: match seg.road_type {
                 RoadType::Normal => 0.0,
                 RoadType::Highway => 1.0,
+                RoadType::Highway2x4 => 2.0,
             },
             major_id: seg.major_id.map(|m| m as f32).unwrap_or(-1.0),
             ..default()

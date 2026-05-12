@@ -287,6 +287,7 @@ fn scene_for(vis: &WorldVisuals, bt: ZoneType, lvl: u32) -> Handle<Scene> {
 
 fn sync_splat_map_system(
     grid: Res<CityGrid>,
+    roads: Res<RoadData>,
     splat_map_res: Option<Res<TerrainSplatMap>>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -296,8 +297,13 @@ fn sync_splat_map_system(
             let mut data = vec![0u8; (grid.width * grid.height) as usize];
             for y in 0..grid.height {
                 for x in 0..grid.width {
-                    if let Some(Tile::Road(_)) = grid.get(x, y) {
-                        data[(y * grid.width + x) as usize] = 255;
+                    if let Some(Tile::Road(seg_id)) = grid.get(x, y) {
+                        let rtype = roads.segments[seg_id as usize].road_type;
+                        data[(y * grid.width + x) as usize] = match rtype {
+                            crate::sim::roads::RoadType::Normal => 1,
+                            crate::sim::roads::RoadType::Highway => 2,
+                            crate::sim::roads::RoadType::Highway2x4 => 3,
+                        };
                     }
                 }
             }
