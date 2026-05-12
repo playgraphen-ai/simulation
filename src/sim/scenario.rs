@@ -228,18 +228,21 @@ let tile_to_seg = roads.rebuild_topology();
 
     // 2. Zone the blocks for all cities
     for &(start_x, start_y) in &offsets {
-        for gy in 0..grid_size_y {
-            for gx in 0..grid_size_x {
+        for gy_signed in -1..=(grid_size_y as i32) {
+            for gx_signed in -1..=(grid_size_x as i32) {
                 // Pseudo-random distribution based on coordinates to get 40% res, 30% office, 30% shop
-                let pseudo_rand = (gx * 7 + gy * 13 + start_x + start_y) % 10;
+                let pseudo_rand = (gx_signed * 7 + gy_signed * 13 + start_x as i32 + start_y as i32).rem_euclid(10) as u32;
                 let zone = match pseudo_rand {
                     0..=3 => ZoneType::Residential, // 40%
                     4..=6 => ZoneType::Office,      // 30%
                     _ => ZoneType::Shop,            // 30%
                 };
 
-                let bx = start_x + gx * block_size;
-                let by = start_y + gy * block_size;
+                let bx_signed = start_x as i32 + gx_signed * block_size as i32;
+                let by_signed = start_y as i32 + gy_signed * block_size as i32;
+                if bx_signed < 0 || by_signed < 0 { continue; }
+                let bx = bx_signed as u32;
+                let by = by_signed as u32;
 
                 let b_size = match zone {
                     ZoneType::Residential => 3,
