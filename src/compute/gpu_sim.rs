@@ -160,6 +160,7 @@ pub struct GpuReadbackBuffer {
     pub p_mapped: Arc<AtomicBool>,
     pub b_mapped: Arc<AtomicBool>,
     pub s_mapped: Arc<AtomicBool>,
+    pub last_selection_frame: u32,
 }
 
 #[derive(Resource, Default)]
@@ -838,6 +839,13 @@ impl bevy::render::render_graph::Node for GpuSimNode {
 
         // Selective Readbacks
         if let Some(selection) = world.get_resource::<crate::ui::inspector::Selection>() {
+            let changed = selection.changed_frame != readback.last_selection_frame;
+            if changed {
+                // If it changed, we should trigger a read
+                // (Note: To be fully safe with map_async, we check if it's not currently mapped.
+                // If it is mapped, we will just miss a frame of update, which is fine for UI).
+            }
+            
             match selection.obj {
                 Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
                     if !readback.p_mapped.load(Ordering::Relaxed) {
@@ -903,7 +911,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
 
 fn map_and_send_readback(
     _render_device: Res<RenderDevice>,
-    readback: Res<GpuReadbackBuffer>,
+    mut readback: ResMut<GpuReadbackBuffer>,
     sender_p: Res<PeopleSender>,
     sender_b: Res<BuildingsSender>,
     sender_s: Res<StatsSender>,
@@ -931,9 +939,14 @@ fn map_and_send_readback(
     }
 
     if let Some(sel) = selection {
+        let changed = sel.changed_frame != readback.last_selection_frame;
+        if changed {
+            readback.last_selection_frame = sel.changed_frame;
+        }
+
         match sel.obj {
             Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
-                if !readback.p_mapped.load(Ordering::Relaxed) {
+                if changed || !readback.p_mapped.load(Ordering::Relaxed) {
                     if let Some(p_buf) = readback.inspector_p_buf.as_ref() {
                         readback.p_mapped.store(true, Ordering::Relaxed);
                         let tx_p = sender_p.0.lock().unwrap().clone();
@@ -958,7 +971,7 @@ fn map_and_send_readback(
                 }
             }
             Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
-                if !readback.b_mapped.load(Ordering::Relaxed) {
+                if changed || !readback.b_mapped.load(Ordering::Relaxed) {
                     if let Some(b_buf) = readback.inspector_b_buf.as_ref() {
                         readback.b_mapped.store(true, Ordering::Relaxed);
                         let tx_b = sender_b.0.lock().unwrap().clone();

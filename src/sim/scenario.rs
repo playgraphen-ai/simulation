@@ -288,6 +288,7 @@ let tile_to_seg = roads.rebuild_topology();
     if let Some(bid) = first_building_id {
         commands.insert_resource(Selection {
             obj: Some(SelectedObj::Building(bid)),
+            changed_frame: 1,
         });
     }
 

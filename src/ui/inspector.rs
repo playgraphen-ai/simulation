@@ -20,6 +20,7 @@ pub enum SelectedObj {
 #[derive(Resource, Default, Clone, ExtractResource)]
 pub struct Selection {
     pub obj: Option<SelectedObj>,
+    pub changed_frame: u32,
 }
 
 #[derive(Component)]
@@ -105,6 +106,7 @@ pub fn handle_selection(
 
     if let Some(car_id) = closest_car {
         selection.obj = Some(SelectedObj::Person(car_id));
+        selection.changed_frame += 1;
         return;
     }
 
@@ -113,20 +115,26 @@ pub fn handle_selection(
         match grid.get(x, z) {
             Some(Tile::Building(bid)) => {
                 selection.obj = Some(SelectedObj::Building(bid));
+                selection.changed_frame += 1;
                 return;
             }
             Some(Tile::Zone(ztype)) => {
                 selection.obj = Some(SelectedObj::Zone(ztype));
+                selection.changed_frame += 1;
                 return;
             }
             Some(Tile::Road(rid)) => {
                 selection.obj = Some(SelectedObj::Road(rid));
+                selection.changed_frame += 1;
                 return;
             }
             _ => {}
         }
     }
 
+    if selection.obj.is_some() {
+        selection.changed_frame += 1;
+    }
     selection.obj = None;
 }
 
