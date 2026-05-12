@@ -54,7 +54,10 @@ pub enum SliderKind {
 #[derive(Component)]
 pub struct SliderFill(pub SliderKind);
 
-pub fn setup_toolbar(mut commands: Commands) {
+#[derive(Component)]
+pub struct SliderValueText(pub SliderKind);
+
+pub fn setup_toolbar(mut commands: Commands, durations: Res<ActivityDurations>, settings: Res<SimSettings>) {
     // Root panel, right-hand side.
     commands.spawn((
         Node {
@@ -82,18 +85,18 @@ pub fn setup_toolbar(mut commands: Commands) {
         spawn_button(p);
 
         label(p, "ECONOMY & RULES");
-        slider_row(p, "Abandon x", SliderKind::AbandonMultiplier, 0.1, 5.0, 1.0);
-        slider_row(p, "Rent Cost", SliderKind::RentCost, 0.0, 100.0, 20.0);
-        slider_row(p, "Work Pay", SliderKind::WorkSalary, 10.0, 200.0, 50.0);
-        slider_row(p, "Shop Cost", SliderKind::ShopCost, 0.0, 100.0, 30.0);
-        slider_row(p, "Collisions", SliderKind::Collisions, 0.0, 1.0, 1.0);
+        slider_row(p, "Abandon x", SliderKind::AbandonMultiplier, 0.1, 5.0, settings.abandon_multiplier);
+        slider_row(p, "Rent Cost", SliderKind::RentCost, 0.0, 100.0, settings.rent_cost);
+        slider_row(p, "Work Pay", SliderKind::WorkSalary, 10.0, 200.0, settings.work_salary);
+        slider_row(p, "Shop Cost", SliderKind::ShopCost, 0.0, 100.0, settings.shop_cost);
+        slider_row(p, "Collisions", SliderKind::Collisions, 0.0, 1.0, settings.collisions_enabled);
 
         label(p, "ACTIVITIES (s)");
 
-        slider_row(p, "Home", SliderKind::HomeDuration, 0.0, 120.0, 30.0);
-        slider_row(p, "Work", SliderKind::WorkDuration, 0.0, 120.0, 45.0);
-        slider_row(p, "Shop", SliderKind::ShopDuration, 0.0, 120.0, 15.0);
-        slider_row(p, "P(home→work)", SliderKind::HomeToWorkProb, 0.0, 1.0, 0.6);
+        slider_row(p, "Home", SliderKind::HomeDuration, 0.0, 300.0, durations.home);
+        slider_row(p, "Work", SliderKind::WorkDuration, 0.0, 300.0, durations.work);
+        slider_row(p, "Shop", SliderKind::ShopDuration, 0.0, 300.0, durations.shop);
+        slider_row(p, "P(home→work)", SliderKind::HomeToWorkProb, 0.0, 1.0, durations.home_to_work_prob);
     });
 }
 
@@ -190,6 +193,13 @@ fn slider_row(p: &mut ChildSpawnerCommands, label_s: &str, kind: SliderKind, min
                 bevy::ui::FocusPolicy::Pass,
             ));
         });
+        row.spawn((
+            Text::new(format!("{:.1}", init)),
+            TextFont { font_size: 12.0, ..default() },
+            TextColor(Color::WHITE),
+            Node { width: Val::Px(24.), ..default() },
+            SliderValueText(kind),
+        ));
     });
 }
 
@@ -249,6 +259,7 @@ pub fn handle_sliders(
     mut settings: ResMut<SimSettings>,
     mut tracks: Query<(&Interaction, &bevy::ui::RelativeCursorPosition, &SliderKind, &SliderRange)>,
     mut fills: Query<(&SliderFill, &mut Node)>,
+    mut texts: Query<(&SliderValueText, &mut Text)>,
 ) {
     if !mouse.pressed(MouseButton::Left) { return; }
     for (interaction, rel_cursor, kind, range) in &mut tracks {
@@ -270,6 +281,11 @@ pub fn handle_sliders(
             for (fill, mut fill_node) in &mut fills {
                 if std::mem::discriminant(&fill.0) == std::mem::discriminant(kind) {
                     fill_node.width = Val::Percent(ratio * 100.);
+                }
+            }
+            for (text_kind, mut text) in &mut texts {
+                if std::mem::discriminant(&text_kind.0) == std::mem::discriminant(kind) {
+                    text.0 = format!("{:.1}", value);
                 }
             }
         }
