@@ -29,24 +29,18 @@ pub fn update_counters_system(
     let mut res = 0;
     let mut off = 0;
     let mut shop = 0;
-    let mut res_occ = 0;
-    let mut off_occ = 0;
-    let mut shop_occ = 0;
 
     for b in &buildings.items {
         if b.capacity > 0 {
             match b.btype {
                 crate::sim::grid::ZoneType::Residential => {
                     res += 1;
-                    res_occ += b.occupants;
                 }
                 crate::sim::grid::ZoneType::Office => {
                     off += 1;
-                    off_occ += b.occupants;
                 }
                 crate::sim::grid::ZoneType::Shop => {
                     shop += 1;
-                    shop_occ += b.occupants;
                 }
             }
         }
@@ -55,7 +49,4 @@ pub fn update_counters_system(
     counters.residential = res;
     counters.offices = off;
     counters.shops = shop;
-    counters.res_occupants = res_occ;
-    counters.office_occupants = off_occ;
-    counters.shop_occupants = shop_occ;
 }

@@ -839,4 +839,5 @@ fn main_recount_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
     atomicAdd(&stats.shop_count, s_count);
     atomicAdd(&stats.travelling_count, t_count);
     atomicAdd(&stats.total_money, total_money);
+    atomicAdd(&stats.bankrupt_count, bankrupt);
 }

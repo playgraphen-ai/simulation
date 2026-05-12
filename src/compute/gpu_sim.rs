@@ -1023,7 +1023,9 @@ pub fn apply_gpu_readback(
             counters.people = stats.people_count;
             counters.cars = stats.travelling_count;
             counters.bankrupt = stats.bankrupt_count;
-            // Optionally update more counters here if needed
+            counters.res_occupants = stats.home_count;
+            counters.office_occupants = stats.work_count;
+            counters.shop_occupants = stats.shop_count;
         }
     }
 
