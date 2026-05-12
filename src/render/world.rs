@@ -68,12 +68,12 @@ fn setup_ground(
     let w = grid.width;
     let h = grid.height;
     
-    // Create the splat map image (R8Unorm is enough for a mask: 0 = grass, 255 = road)
+    // Create the splat map image
     let mut splat_image = Image::new_fill(
         Extent3d { width: w, height: h, depth_or_array_layers: 1 },
         TextureDimension::D2,
-        &[0],
-        TextureFormat::R8Unorm,
+        &[0, 0, 0, 0],
+        TextureFormat::Rgba8Unorm,
         RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
     );
     splat_image.texture_descriptor.usage |= TextureUsages::COPY_DST | TextureUsages::TEXTURE_BINDING;
@@ -294,16 +294,48 @@ fn sync_splat_map_system(
     if !grid.is_changed() { return; }
     if let Some(res) = splat_map_res {
         if let Some(img) = images.get_mut(&res.0) {
-            let mut data = vec![0u8; (grid.width * grid.height) as usize];
+            let mut data = vec![0u8; (grid.width * grid.height * 4) as usize];
             for y in 0..grid.height {
                 for x in 0..grid.width {
                     if let Some(Tile::Road(seg_id)) = grid.get(x, y) {
-                        let rtype = roads.segments[seg_id as usize].road_type;
-                        data[(y * grid.width + x) as usize] = match rtype {
-                            crate::sim::roads::RoadType::Normal => 1,
-                            crate::sim::roads::RoadType::Highway => 2,
+                        let seg = &roads.segments[seg_id as usize];
+                        let rtype = seg.road_type;
+                        
+                        // Determine actual direction from segment endpoints
+                        let dx = (seg.b.0 as i32 - seg.a.0 as i32).abs();
+                        let dy = (seg.b.1 as i32 - seg.a.1 as i32).abs();
+                        let is_v = dy > dx;
+                        
+                        // Detect if tile is near the segment ends (junctions)
+                        let radius = match rtype {
                             crate::sim::roads::RoadType::Highway2x4 => 3,
+                            crate::sim::roads::RoadType::Highway => 2,
+                            crate::sim::roads::RoadType::Normal => 1,
                         };
+                        
+                        let dist_a = (x as i32 - seg.a.0 as i32).abs().max((y as i32 - seg.a.1 as i32).abs());
+                        let dist_b = (x as i32 - seg.b.0 as i32).abs().max((y as i32 - seg.b.1 as i32).abs());
+                        let is_i = dist_a <= radius || dist_b <= radius;
+
+                        let variant = if is_i {
+                            2 // Intersection
+                        } else if is_v {
+                            1 // Vertical
+                        } else {
+                            0 // Horizontal
+                        };
+
+                        let base = match rtype {
+                            crate::sim::roads::RoadType::Normal => 1,
+                            crate::sim::roads::RoadType::Highway => 4,
+                            crate::sim::roads::RoadType::Highway2x4 => 7,
+                        };
+                        
+                        let idx = (y * grid.width + x) as usize * 4;
+                        data[idx] = base + variant; // R: Type and Direction
+                        data[idx + 1] = if is_v { (seg.a.0 % 256) as u8 } else { (seg.a.1 % 256) as u8 }; // G: Center axis anchor
+                        data[idx + 2] = 0; // B
+                        data[idx + 3] = 255; // A
                     }
                 }
             }

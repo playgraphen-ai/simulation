@@ -45,9 +45,9 @@ pub fn setup_menu(mut commands: Commands) {
             Node { margin: UiRect::bottom(Val::Px(40.0)), ..default() },
         ));
 
-        spawn_btn(p, "Small City (3x3 blocks, 20k pop)", MenuAction::Small);
-        spawn_btn(p, "Medium City (6x5 blocks, 20k pop)", MenuAction::Medium);
-        spawn_btn(p, "Large City (20x16 blocks, 20k pop)", MenuAction::Large);
+        spawn_btn(p, "Small City (3x3 blocks, 30k pop)", MenuAction::Small);
+        spawn_btn(p, "Medium City (6x5 blocks, 30k pop)", MenuAction::Medium);
+        spawn_btn(p, "Large City (20x16 blocks, 30k pop)", MenuAction::Large);
     });
 }
 
@@ -83,9 +83,9 @@ pub fn handle_menu_actions(
         match *interaction {
             Interaction::Pressed => {
                 match action {
-                    MenuAction::Small => { settings.grid_x = 3; settings.grid_y = 3; settings.population = 20000; }
-                    MenuAction::Medium => { settings.grid_x = 6; settings.grid_y = 5; settings.population = 20000; }
-                    MenuAction::Large => { settings.grid_x = 20; settings.grid_y = 16; settings.population = 20000; }
+                    MenuAction::Small => { settings.grid_x = 3; settings.grid_y = 3; settings.population = 30000; }
+                    MenuAction::Medium => { settings.grid_x = 6; settings.grid_y = 5; settings.population = 30000; }
+                    MenuAction::Large => { settings.grid_x = 20; settings.grid_y = 16; settings.population = 30000; }
                 }
                 if let Ok(e) = root.single() {
                     commands.entity(e).despawn();

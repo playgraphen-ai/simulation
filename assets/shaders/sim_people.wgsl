@@ -177,6 +177,10 @@ fn main_people_occupancy(@builtin(global_invocation_id) gid: vec3<u32>) {
             let lane = f32(pid % 2u);
             let lane_offset = 0.5 + lane * 1.0;
             offset = select(lane_offset, -lane_offset, start_at_b);
+        } else if rtype == 2.0 {
+            let lane = f32(pid % 4u);
+            let lane_offset = 0.5 + lane * 0.675;
+            offset = select(lane_offset, -lane_offset, start_at_b);
         }
         
         let pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), frac) + side * offset;
@@ -305,6 +309,10 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                     let lane = f32(pid % 2u);
                     let lane_offset = 0.5 + lane * 1.0;
                     offset = select(lane_offset, -lane_offset, start_at_b);
+                } else if rtype == 2.0 {
+                    let lane = f32(pid % 4u);
+                    let lane_offset = 0.5 + lane * 0.675;
+                    offset = select(lane_offset, -lane_offset, start_at_b);
                 }
 
                 let current_pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), current_frac) + side * offset;
@@ -349,6 +357,10 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                             if n_rtype == 1.0 {
                                 let lane = f32(pid % 2u);
                                 let lane_offset = 0.5 + lane * 1.0;
+                                n_offset = select(lane_offset, -lane_offset, next_start_at_b);
+                            } else if n_rtype == 2.0 {
+                                let lane = f32(pid % 4u);
+                                let lane_offset = 0.5 + lane * 0.675;
                                 n_offset = select(lane_offset, -lane_offset, next_start_at_b);
                             }
 

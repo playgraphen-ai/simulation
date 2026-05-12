@@ -119,8 +119,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let r_tex4 = textureLoad(roads_tex, coords[4]);
     let road_type = r_tex4.x;
     
-    // Capacity depends on length and lanes (1 lane for Normal, 2 for Highway)
-    let lanes = select(1.0, 2.0, road_type == 1.0);
+    // Capacity depends on length and lanes (1 lane for Normal, 2 for Highway, 4 for Highway2x4)
+    var lanes = 1.0;
+    if (road_type == 1.0) {
+        lanes = 2.0;
+    } else if (road_type == 2.0) {
+        lanes = 4.0;
+    }
     let capacity = max(1.0, seg_len * lanes * 1.2); // 1.2 cars per unit per lane for saturation
     
     // Factor: 1.0 = empty (full speed), 0.1 = completely jammed.

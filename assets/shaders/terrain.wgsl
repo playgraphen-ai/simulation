@@ -51,71 +51,88 @@ fn fragment(
     let pos = mesh.world_position.xz;
 
     // Échantillonnage de la Splat Map pour les routes
-    // On utilise floor(pos) pour que la route soit parfaitement alignée sur la grille
     let splat_dim = textureDimensions(splat_texture);
     let splat_coord = clamp(vec2<i32>(floor(pos)), vec2<i32>(0), vec2<i32>(splat_dim) - vec2<i32>(1));
-    // On utilise textureLoad pour une lecture brute sans interpolation (pixel perfect)
-    let road_id_f = textureLoad(splat_texture, splat_coord, 0).r;
-    let road_id = i32(road_id_f * 255.0 + 0.5);
+    let splat = textureLoad(splat_texture, splat_coord, 0);
+    let road_id = i32(splat.r * 255.0 + 0.5);
+    let axis_val = splat.g * 255.0;
     
     // Échantillonnage de la texture d'herbe
-    // On augmente la fréquence pour que l'herbe soit détaillée à l'échelle d'une voiture
-    // Si une case (1.0 unité) est une voiture (~4m), pos * 2.0 répète la texture 2 fois par case.
     let grass_uv = pos * 1.5; 
     let grass_tex_color = textureSample(grass_texture, grass_sampler, grass_uv).rgb;
 
     // Génération de bruit pour les variations de couleur
-    let n_base = fbm(pos * 0.1);   // Variations larges (biomes/terrain)
-    let n_detail = fbm(pos * 1.0); // Variations fines (détails au sol)
+    let n_base = fbm(pos * 0.1);
+    let n_detail = fbm(pos * 1.0);
 
-    // Définition des couleurs de base, modulées par le bruit et la texture
     let color_water = vec3<f32>(0.1, 0.3, 0.6) * (0.9 + 0.2 * n_detail);
     let color_plains = grass_tex_color * (0.85 + 0.3 * n_base);
     let color_forest = grass_tex_color * vec3<f32>(0.6, 0.8, 0.5) * (0.7 + 0.4 * fbm(pos * 0.5));
     let color_desert = vec3<f32>(0.8, 0.7, 0.5) * (0.9 + 0.2 * n_base);
 
-    // Mélange final via les poids de splatting
     var final_color = color_water * weights.r +
                       color_plains * weights.g +
                       color_forest * weights.b +
                       color_desert * weights.a;
 
-    // Couleur de la route (Gris foncé bitume)
-    // On ajoute un peu de bruit de détail sur la route pour qu'elle ne soit pas plate
-    let road_noise = n_detail * 0.05;
-    var road_color = vec3<f32>(0.15, 0.15, 0.17) + road_noise;
-    
-    // Marquages au sol pour les autoroutes
-    if (road_id == 2) { // Highway
-        let local_pos = fract(pos);
-        // Ligne blanche discontinue sur les bords ou milieu ?
-        // Ici on va faire une ligne blanche sur les bords des cases 2x2
-        let is_edge = local_pos.x < 0.05 || local_pos.x > 0.95 || local_pos.y < 0.05 || local_pos.y > 0.95;
-        if (is_edge) {
-            road_color += vec3<f32>(0.1, 0.1, 0.1);
-        }
-    } else if (road_id == 3) { // Highway 2x4
-        let local_pos = fract(pos);
-        road_color = vec3<f32>(0.12, 0.12, 0.14) + road_noise; // Un peu plus sombre
+    // Rendu dynamique des routes
+    if (road_id >= 1 && road_id <= 9) {
+        let is_v = road_id == 2 || road_id == 5 || road_id == 8;
+        let is_i = road_id == 3 || road_id == 6 || road_id == 9;
         
-        // Lignes jaunes doubles au milieu d'une des cases
-        let dist_x = abs(local_pos.x - 0.5);
-        let dist_y = abs(local_pos.y - 0.5);
-        if ((dist_x < 0.03 && dist_x > 0.01) || (dist_y < 0.03 && dist_y > 0.01)) {
-            road_color = vec3<f32>(0.8, 0.6, 0.1);
-        }
+        // Coordonnées le long et à travers la route
+        let pos_across = select(pos.y, pos.x, is_v);
+        let pos_along = select(pos.x, pos.y, is_v);
         
-        // Lignes blanches pointillées pour les voies
-        let lane_x = fract(pos.x * 2.0);
-        let lane_y = fract(pos.y * 2.0);
-        let dash = fract(pos.x * 0.5) > 0.5 || fract(pos.y * 0.5) > 0.5;
-        if ((abs(lane_x - 0.5) < 0.01 || abs(lane_y - 0.5) < 0.01) && dash) {
-            road_color = vec3<f32>(0.7, 0.7, 0.7);
-        }
-    }
+        // Calcul de la distance depuis le centre exact de la route
+        let pos_across_mod = pos_across - floor(pos_across / 256.0) * 256.0;
+        let center = axis_val + 1.0;
+        
+        var signed_dist = pos_across_mod - center;
+        if (signed_dist > 128.0) { signed_dist -= 256.0; }
+        if (signed_dist < -128.0) { signed_dist += 256.0; }
+        let dist_across = abs(signed_dist);
+        
+        let dash = fract(pos_along * 0.5) > 0.5; // Alternance des pointillés
+        var road_color = vec3<f32>(0.15, 0.15, 0.17) + n_detail * 0.05;
 
-    // On mix la route au dessus du terrain
-    if (road_id > 0) {
+        if (road_id >= 1 && road_id <= 3) { // Normal Road
+            road_color = vec3<f32>(0.2, 0.2, 0.22) + n_detail * 0.05;
+            if (!is_i) {
+                if (dist_across < 0.05 && dash) {
+                    road_color = vec3<f32>(0.8, 0.8, 0.8);
+                }
+            }
+        } else if (road_id >= 4 && road_id <= 6) { // Highway (2x2)
+            road_color = vec3<f32>(0.15, 0.15, 0.17) + n_detail * 0.05;
+            if (!is_i) {
+                if (dist_across > 1.8 && dist_across < 1.95) {
+                    road_color = vec3<f32>(0.85, 0.85, 0.85); // Ligne de rive
+                }
+                if (dist_across > 0.05 && dist_across < 0.15) {
+                    road_color = vec3<f32>(0.8, 0.6, 0.1); // Double jaune
+                }
+            }
+        } else if (road_id >= 7 && road_id <= 9) { // Highway 2x4
+            road_color = vec3<f32>(0.12, 0.12, 0.14) + n_detail * 0.05;
+            if (!is_i) {
+                if (dist_across > 2.8 && dist_across < 2.95) {
+                    road_color = vec3<f32>(0.9, 0.9, 0.9); // Ligne de rive
+                }
+                if (dist_across < 0.15) {
+                    road_color = vec3<f32>(0.7, 0.6, 0.1); // Terre-plein central
+                }
+                
+                // Marquages des 4 voies par direction
+                let is_lane_marker = abs(dist_across - 0.825) < 0.05 || 
+                                     abs(dist_across - 1.5) < 0.05 || 
+                                     abs(dist_across - 2.175) < 0.05;
+                if (is_lane_marker && dash) {
+                    road_color = vec3<f32>(0.8, 0.8, 0.8);
+                }
+            }
+        }
+
         final_color = road_color;
     }
 

@@ -148,6 +148,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
             if rtype == 1.0 {
                 let lane = f32(pid % 2u);
                 offset = 0.5 + lane * 1.0;
+            } else if rtype == 2.0 {
+                let lane = f32(pid % 4u);
+                offset = 0.5 + lane * 0.675;
             }
             world_pos = world_pos + right * offset;
 
