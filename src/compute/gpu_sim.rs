@@ -149,7 +149,7 @@ pub struct GpuStats {
     pub _pad: u32,
 }
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 #[derive(Resource, Default)]
@@ -160,7 +160,8 @@ pub struct GpuReadbackBuffer {
     pub p_mapped: Arc<AtomicBool>,
     pub b_mapped: Arc<AtomicBool>,
     pub s_mapped: Arc<AtomicBool>,
-    pub last_selection_frame: u32,
+    pub last_copy_frame: Arc<AtomicU32>,
+    pub last_map_frame: u32,
 }
 
 #[derive(Resource, Default)]
@@ -839,12 +840,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
 
         // Selective Readbacks
         if let Some(selection) = world.get_resource::<crate::ui::inspector::Selection>() {
-            let changed = selection.changed_frame != readback.last_selection_frame;
-            if changed {
-                // If it changed, we should trigger a read
-                // (Note: To be fully safe with map_async, we check if it's not currently mapped.
-                // If it is mapped, we will just miss a frame of update, which is fine for UI).
-            }
+            let changed = selection.changed_frame != readback.last_copy_frame.load(Ordering::Relaxed);
             
             match selection.obj {
                 Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
@@ -868,6 +864,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                                     },
                                     Extent3d { width: 3, height: 1, depth_or_array_layers: 1 },
                                 );
+                                readback.last_copy_frame.store(selection.changed_frame, Ordering::Relaxed);
                             }
                         }
                     }
@@ -893,11 +890,16 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                                     },
                                     Extent3d { width: 3, height: 1, depth_or_array_layers: 1 },
                                 );
+                                readback.last_copy_frame.store(selection.changed_frame, Ordering::Relaxed);
                             }
                         }
                     }
                 }
-                _ => {}
+                _ => {
+                    if changed {
+                        readback.last_copy_frame.store(selection.changed_frame, Ordering::Relaxed);
+                    }
+                }
             }
         }
 
@@ -939,14 +941,11 @@ fn map_and_send_readback(
     }
 
     if let Some(sel) = selection {
-        let changed = sel.changed_frame != readback.last_selection_frame;
-        if changed {
-            readback.last_selection_frame = sel.changed_frame;
-        }
+        let changed = sel.changed_frame != readback.last_map_frame;
 
         match sel.obj {
             Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
-                if changed || !readback.p_mapped.load(Ordering::Relaxed) {
+                if !readback.p_mapped.load(Ordering::Relaxed) && readback.last_copy_frame.load(Ordering::Relaxed) == sel.changed_frame {
                     if let Some(p_buf) = readback.inspector_p_buf.as_ref() {
                         readback.p_mapped.store(true, Ordering::Relaxed);
                         let tx_p = sender_p.0.lock().unwrap().clone();
@@ -967,11 +966,14 @@ fn map_and_send_readback(
                             }
                             p_mapped_flag.store(false, Ordering::Relaxed);
                         });
+                        if changed {
+                            readback.last_map_frame = sel.changed_frame;
+                        }
                     }
                 }
             }
             Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
-                if changed || !readback.b_mapped.load(Ordering::Relaxed) {
+                if !readback.b_mapped.load(Ordering::Relaxed) && readback.last_copy_frame.load(Ordering::Relaxed) == sel.changed_frame {
                     if let Some(b_buf) = readback.inspector_b_buf.as_ref() {
                         readback.b_mapped.store(true, Ordering::Relaxed);
                         let tx_b = sender_b.0.lock().unwrap().clone();
@@ -992,10 +994,17 @@ fn map_and_send_readback(
                             }
                             b_mapped_flag.store(false, Ordering::Relaxed);
                         });
+                        if changed {
+                            readback.last_map_frame = sel.changed_frame;
+                        }
                     }
                 }
             }
-            _ => {}
+            _ => {
+                if changed {
+                    readback.last_map_frame = sel.changed_frame;
+                }
+            }
         }
     }
 }
