@@ -751,7 +751,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             // --- CLEAR PASS ---
             // Clear stats and building stats before any logic logic
             if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
-                render_context.command_encoder().clear_buffer(stats_buf, 0, None);
+                render_context.command_encoder().clear_buffer(stats_buf, 0, Some(60));
             }
             if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
                 render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
