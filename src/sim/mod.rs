@@ -95,16 +95,23 @@ pub struct SimSettings {
     pub rent_cost: f32,
     pub work_salary: f32,
     pub shop_cost: f32,
+    pub tax_income: f32,
+    pub tax_rent: f32,
+    pub tax_consumption: f32,
     pub collisions_enabled: f32, // 1.0 for true, 0.0 for false
 }
 
 impl Default for SimSettings {
     fn default() -> Self {
+        let dur = ActivityDurations::default();
         Self {
             abandon_multiplier: 1.0,
             rent_cost: 20.0,
             work_salary: 50.0,
             shop_cost: 30.0,
+            tax_income: dur.tax_income,
+            tax_rent: dur.tax_rent,
+            tax_consumption: dur.tax_consumption,
             collisions_enabled: 1.0,
         }
     }
@@ -120,6 +127,9 @@ pub struct ActivityDurations {
     pub shop: f32,
     /// Probability 0..1 of going to work (vs. shopping) after home.
     pub home_to_work_prob: f32,
+    pub tax_income: f32,
+    pub tax_rent: f32,
+    pub tax_consumption: f32,
 }
 
 impl Default for ActivityDurations {
@@ -128,7 +138,15 @@ impl Default for ActivityDurations {
         std::fs::read_to_string("assets/sim_schedule.json")
             .ok()
             .and_then(|s| serde_json::from_str::<ActivityDurations>(&s).ok())
-            .unwrap_or(Self { home: 150.0, work: 225.0, shop: 75.0, home_to_work_prob: 0.6 })
+            .unwrap_or(Self { 
+                home: 150.0, 
+                work: 225.0, 
+                shop: 75.0, 
+                home_to_work_prob: 0.6,
+                tax_income: 0.15,
+                tax_rent: 0.1,
+                tax_consumption: 0.08,
+            })
     }
 }
 

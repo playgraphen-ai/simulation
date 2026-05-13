@@ -7,5 +7,8 @@
   "home": 150.0,
   "work": 225.0,
   "shop": 75.0,
-  "home_to_work_prob": 0.6
+  "home_to_work_prob": 0.6,
+  "tax_income": 0.15,
+  "tax_rent": 0.1,
+  "tax_consumption": 0.08
 }

@@ -17,6 +17,9 @@ struct SimParams {
     rent_cost: f32,
     work_salary: f32,
     shop_cost: f32,
+    tax_income: f32,
+    tax_rent: f32,
+    tax_consumption: f32,
     buildings_tex_w: u32,
     buildings_tex_h: u32,
     roads_tex_w: u32,
@@ -36,6 +39,10 @@ struct SimParams {
     grid_w: u32,
     grid_h: u32,
     entry_seg: u32,
+    collisions_enabled: f32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 };
 
 struct PathRequest {
@@ -62,6 +69,7 @@ struct PathRequestQueue {
 // Binding 6: Congestion buffer
 // Binding 7: Stats buffer
 @group(0) @binding(8) var<storage, read_write> occupancy: array<atomic<u32>>;
+@group(0) @binding(9) var<storage, read_write> building_stats: array<atomic<u32>>; // occupants: idx*3, assigned: idx*3+1, tax: idx*3+2
 
 fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
     let base = i32(pid * 3u);
@@ -125,10 +133,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         var tex1 = textureLoad(buildings_tex, coords[1]);
         
         let btype = tex0.z; // 0=Res, 1=Off, 2=Shop
-        let occupants = tex1.y;
         let capacity = tex1.z;
+        let assigned = atomicLoad(&building_stats[bid * 3u + 1u]);
         
-        if btype == 0.0 && occupants < capacity {
+        if btype == 0.0 && f32(assigned) < capacity {
             let home_seg = u32(tex1.w);
             let r_coords = road_coords(home_seg);
             let r_tex0 = textureLoad(roads_tex, r_coords[0]);
@@ -154,11 +162,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                     home_id = bid;
                     found_home = true;
                     
-                    // Increment occupants (probabilistic, non-atomic for now to avoid complexity, 
-                    // but retries help. For thousands of spawns, some overlap is okay 
-                    // as buildings will auto-correct next frame)
-                    tex1.y = tex1.y + 1.0;
-                    textureStore(buildings_tex, coords[1], tex1);
+                    atomicAdd(&building_stats[bid * 3u + 1u], 1u);
                     break;
                 }
             }
@@ -177,15 +181,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let tex1 = textureLoad(buildings_tex, coords[1]);
         
         let btype = tex0.z;
-        let occupants = tex1.y;
         let capacity = tex1.z;
+        let assigned = atomicLoad(&building_stats[bid * 3u + 1u]);
         
-        if btype == 1.0 && occupants < capacity {
+        if btype == 1.0 && f32(assigned) < capacity {
             work_id = bid;
             found_work = true;
+            atomicAdd(&building_stats[bid * 3u + 1u], 1u);
             break;
         }
     }
+
 
     // 3. Initialize Person
     let p_coords = person_coords(pid);
@@ -221,8 +227,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(people_tex, p_coords[2], texel2);
 
     // Reset path buffer for this person
-    let path_idx = pid * 256u;
-    if path_idx < 16777216u {
+    let path_idx = pid * 512u;
+    if path_idx < 33554432u { // 65536 * 512
         person_paths[path_idx] = 0xFFFFFFFFu;
     }
 }

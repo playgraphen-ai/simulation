@@ -37,6 +37,7 @@ impl Plugin for UiPlugin {
                 tools::handle_spawn_button,
                 tools::handle_sliders,
                 hud::update_hud,
+                hud::update_money_hud,
                 paint::paint_tick_system,
                 inspector::handle_selection,
                 inspector::update_inspector_ui,

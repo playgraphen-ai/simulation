@@ -50,6 +50,9 @@ pub enum SliderKind {
     WorkSalary,
     ShopCost,
     Collisions,
+    TaxIncome,
+    TaxRent,
+    TaxConsumption,
 }
 
 #[derive(Component)]
@@ -92,6 +95,11 @@ pub fn setup_toolbar(mut commands: Commands, durations: Res<ActivityDurations>, 
         slider_row(p, "Work Pay", SliderKind::WorkSalary, 10.0, 200.0, settings.work_salary);
         slider_row(p, "Shop Cost", SliderKind::ShopCost, 0.0, 100.0, settings.shop_cost);
         slider_row(p, "Collisions", SliderKind::Collisions, 0.0, 1.0, settings.collisions_enabled);
+
+        label(p, "TAXATION (%)");
+        slider_row(p, "Income Tax", SliderKind::TaxIncome, 0.0, 0.5, settings.tax_income);
+        slider_row(p, "Rent Tax", SliderKind::TaxRent, 0.0, 0.5, settings.tax_rent);
+        slider_row(p, "Shop Tax", SliderKind::TaxConsumption, 0.0, 0.5, settings.tax_consumption);
 
         label(p, "ACTIVITIES (s)");
 
@@ -279,6 +287,9 @@ pub fn handle_sliders(
                 SliderKind::WorkSalary => settings.work_salary = value,
                 SliderKind::ShopCost => settings.shop_cost = value,
                 SliderKind::Collisions => settings.collisions_enabled = value.round(), // Snap to 0.0 or 1.0
+                SliderKind::TaxIncome => settings.tax_income = value,
+                SliderKind::TaxRent => settings.tax_rent = value,
+                SliderKind::TaxConsumption => settings.tax_consumption = value,
             }
             for (fill, mut fill_node) in &mut fills {
                 if std::mem::discriminant(&fill.0) == std::mem::discriminant(kind) {

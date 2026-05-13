@@ -17,6 +17,10 @@ pub struct SimCounters {
     pub road_segments: u32,
     pub destroyed_buildings: u32,
     pub bankrupt: u32,
+    pub tax_income_total: u32,
+    pub tax_rent_total: u32,
+    pub tax_consumption_total: u32,
+    pub money_total: u32,
 }
 
 pub fn update_counters_system(

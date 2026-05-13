@@ -22,6 +22,9 @@ struct SimParams {
     rent_cost: f32,
     work_salary: f32,
     shop_cost: f32,
+    tax_income: f32,
+    tax_rent: f32,
+    tax_consumption: f32,
     buildings_tex_w: u32,
     buildings_tex_h: u32,
     roads_tex_w: u32,
@@ -75,10 +78,13 @@ struct GpuStats {
     residential_count: atomic<u32>,
     office_count: atomic<u32>,
     shop_count_b: atomic<u32>,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
-    _pad3: u32,
+    residential_assigned: atomic<u32>,
+    office_assigned: atomic<u32>,
+    bankrupt_count: atomic<u32>,
+    tax_income_total: atomic<u32>,
+    tax_rent_total: atomic<u32>,
+    tax_consumption_total: atomic<u32>,
+    _pad: u32,
 };
 
 @group(0) @binding(0) var people_tex: texture_storage_2d<rgba32float, read_write>;

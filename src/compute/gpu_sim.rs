@@ -146,6 +146,9 @@ pub struct GpuStats {
     pub residential_assigned: u32,
     pub office_assigned: u32,
     pub bankrupt_count: u32,
+    pub tax_income_total: u32,
+    pub tax_rent_total: u32,
+    pub tax_consumption_total: u32,
     pub _pad: u32,
 }
 
@@ -308,6 +311,9 @@ pub struct GpuSimParams {
     pub rent_cost: f32,
     pub work_salary: f32,
     pub shop_cost: f32,
+    pub tax_income: f32,
+    pub tax_rent: f32,
+    pub tax_consumption: f32,
     pub buildings_tex_w: u32,
     pub buildings_tex_h: u32,
     pub roads_tex_w: u32,
@@ -349,6 +355,9 @@ impl Default for GpuSimParams {
             rent_cost: 20.0,
             work_salary: 50.0,
             shop_cost: 30.0,
+            tax_income: 0.15,
+            tax_rent: 0.1,
+            tax_consumption: 0.08,
             buildings_tex_w: 0,
             buildings_tex_h: 0,
             roads_tex_w: 0,
@@ -639,7 +648,7 @@ fn prepare_gpu_sim_buffers(
     if stats.0.is_none() {
         stats.0 = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_sim_stats_buffer"),
-            size: 64, // GpuStats
+            size: std::mem::size_of::<GpuStats>() as u64,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         }));
@@ -648,7 +657,7 @@ fn prepare_gpu_sim_buffers(
     if b_stats.0.is_none() {
         b_stats.0 = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_building_stats_buffer"),
-            size: (BUILDING_CAPACITY as u64).max(65536) * 8, // 2 u32 per building (occupants, assigned) = 8 bytes
+            size: (BUILDING_CAPACITY as u64).max(65536) * 12, // 3 u32 per building (occupants, assigned, tax) = 12 bytes
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         }));
@@ -739,10 +748,35 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             pipeline_cache.get_compute_pipeline(gpu_pipeline.spawn_pipeline),
             bind_group
         ) {
+            // --- CLEAR PASS ---
+            // Clear stats and building stats before any logic logic
+            if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
+                render_context.command_encoder().clear_buffer(stats_buf, 0, None);
+            }
+            if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
+                render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
+            }
+
             // Clear occupancy buffer every frame
             if let Some(occ_buf) = world.resource::<GpuOccupancyBuffer>().0.as_ref() {
                 render_context.command_encoder().clear_buffer(occ_buf, 0, None);
             }
+
+            // --- RECOUNT PASS ---
+            // Clear stats and building stats were just done.
+            // Recount pass (1000 people per thread)
+            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                label: Some("gpu_sim_recount_pass"),
+                ..default()
+            });
+            pass.set_bind_group(0, bg, &[]);
+            pass.set_pipeline(recount_pipe);
+            let num_threads = (params.people_count + 999) / 1000;
+            let recount_wg_count = (num_threads + 63) / 64;
+            if params.people_count > 0 {
+                pass.dispatch_workgroups(recount_wg_count, 1, 1);
+            }
+            drop(pass);
 
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                 label: Some("gpu_sim_pass"),
@@ -778,36 +812,19 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             if p_wg_count > 0 {
                 pass.dispatch_workgroups(p_wg_count, 1, 1);
             }
-            
+            drop(pass);
+
+            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                label: Some("gpu_sim_logic_pass"),
+                ..default()
+            });
+            pass.set_bind_group(0, bg, &[]);
+
             // 3. People logic pass
             if params.logic_count > 0 {
                 pass.set_pipeline(logic_pipe);
                 let logic_wg_count = (params.logic_count + 63) / 64;
                 pass.dispatch_workgroups(logic_wg_count, 1, 1);
-            }
-            drop(pass);
-
-            // --- RECOUNT PASS ---
-            // Clear stats before recount
-            if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
-                render_context.command_encoder().clear_buffer(stats_buf, 0, None);
-            }
-            if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
-                render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
-            }
-
-            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                label: Some("gpu_sim_recount_pass"),
-                ..default()
-            });
-            pass.set_bind_group(0, bg, &[]);
-            
-            // 4. Recount pass (1000 people per thread)
-            pass.set_pipeline(recount_pipe);
-            let num_threads = (params.people_count + 999) / 1000;
-            let recount_wg_count = (num_threads + 63) / 64;
-            if params.people_count > 0 {
-                pass.dispatch_workgroups(recount_wg_count, 1, 1);
             }
             drop(pass);
 
@@ -834,7 +851,8 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         // Copy Stats
         if params.do_stats_readback > 0 && !readback.s_mapped.load(Ordering::Relaxed) {
             if let (Some(stats_buf), Some(rb_stats_buf)) = (world.resource::<GpuStatsBuffer>().0.as_ref(), readback.stats_buffer.as_ref()) {
-                render_context.command_encoder().copy_buffer_to_buffer(stats_buf, 0, rb_stats_buf, 0, 64);
+                let size = std::mem::size_of::<GpuStats>() as u64;
+                render_context.command_encoder().copy_buffer_to_buffer(stats_buf, 0, rb_stats_buf, 0, size);
             }
         }
 
@@ -1026,6 +1044,10 @@ pub fn apply_gpu_readback(
             counters.res_occupants = stats.home_count;
             counters.office_occupants = stats.work_count;
             counters.shop_occupants = stats.shop_count;
+            counters.tax_income_total = stats.tax_income_total;
+            counters.tax_rent_total = stats.tax_rent_total;
+            counters.tax_consumption_total = stats.tax_consumption_total;
+            counters.money_total = stats.total_money;
         }
     }
 
@@ -1092,6 +1114,9 @@ pub fn update_gpu_sim_params(
     gpu_params.rent_cost = settings.rent_cost;
     gpu_params.work_salary = settings.work_salary;
     gpu_params.shop_cost = settings.shop_cost;
+    gpu_params.tax_income = settings.tax_income;
+    gpu_params.tax_rent = settings.tax_rent;
+    gpu_params.tax_consumption = settings.tax_consumption;
     gpu_params.buildings_tex_w = buildings.tex_width;
     gpu_params.buildings_tex_h = buildings.tex_height;
     gpu_params.roads_tex_w = roads.tex_width;
