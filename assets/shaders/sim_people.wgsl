@@ -322,7 +322,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 }
 
                 let current_pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), current_frac) + side * offset;
-                let current_idx = u32(current_pos.x + 0.5) + u32(current_pos.y + 0.5) * params.grid_w;
+                var reserved_idx = i32(texel0.y); // Read persistent occupancy index
 
                 let pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), ahead_frac) + side * offset;
                 let tx = u32(pos.x + 0.5);
@@ -332,13 +332,23 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 var is_blocked = false;
                 if params.collisions_enabled > 0.5 {
                     if ahead_idx < params.grid_w * params.grid_h {
-                        let occ = atomicLoad(&occupancy[ahead_idx]);
-                        if (ahead_idx != current_idx && occ > 0u) {
-                            is_blocked = true;
+                        let ahead_idx_i32 = i32(ahead_idx);
+                        if ahead_idx_i32 != reserved_idx {
+                            let old_occ = atomicExchange(&occupancy[ahead_idx], 1u);
+                            if old_occ > 0u {
+                                is_blocked = true;
+                            } else {
+                                // We claimed it! Free old space.
+                                if reserved_idx >= 0 && reserved_idx < i32(params.grid_w * params.grid_h) {
+                                    atomicStore(&occupancy[reserved_idx], 0u);
+                                }
+                                reserved_idx = ahead_idx_i32;
+                                texel0.y = f32(reserved_idx); // Update persistent storage
+                            }
                         }
                     }
 
-                    // If at the end of segment, check next segment
+                    // If at the end of segment, check next segment (peeking only, no lock yet)
                     if !is_blocked && ((start_at_b && ahead_frac <= 0.01) || (!start_at_b && ahead_frac >= 0.99)) {
                         let next_step = current_step + 1u;
                         let next_path_seg = person_paths[base_idx + next_step];
@@ -379,7 +389,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                             
                             if n_idx < params.grid_w * params.grid_h {
                                 let n_occ = atomicLoad(&occupancy[n_idx]);
-                                if (n_idx != current_idx && n_occ > 0u) {
+                                if (i32(n_idx) != reserved_idx && n_occ > 0u) {
                                     is_blocked = true;
                                 }
                             }
@@ -445,6 +455,13 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                         path_cursor = 0.0;
                         activity = ACT_ARRIVED;
                         activity_time = stop_at;
+                        
+                        // Release road occupancy reservation
+                        if reserved_idx >= 0 && reserved_idx < i32(params.grid_w * params.grid_h) {
+                            atomicStore(&occupancy[reserved_idx], 0u);
+                            reserved_idx = -1;
+                            texel0.y = -1.0;
+                        }
                     }
                 }
             }
@@ -510,6 +527,16 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
         // --- RELEASE OLD BUILDINGS ---
         let old_home_f = texel0.w;
         let old_work_f = texel1.x;
+        let reserved_idx_f = texel0.y;
+        
+        // Release road occupancy reservation
+        if reserved_idx_f >= 0.0 {
+            let reserved_idx = i32(reserved_idx_f);
+            if reserved_idx < i32(params.grid_w * params.grid_h) {
+                atomicStore(&occupancy[reserved_idx], 0u);
+            }
+            texel0.y = -1.0;
+        }
         let old_home = u32(old_home_f);
         let old_work = u32(old_work_f);
 

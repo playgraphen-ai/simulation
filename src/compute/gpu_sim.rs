@@ -738,7 +738,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
         let readback = world.resource::<GpuReadbackBuffer>();
 
-        if let (Some(movement_pipe), Some(occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(bg)) = (
+        if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(bg)) = (
             pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline),
@@ -758,10 +758,10 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 }
             }
 
-            // Clear occupancy buffer every frame
-            if let Some(occ_buf) = world.resource::<GpuOccupancyBuffer>().0.as_ref() {
-                render_context.command_encoder().clear_buffer(occ_buf, 0, None);
-            }
+            // Clear occupancy buffer every frame (REMOVED - now persistent via atomicExchange)
+            // if let Some(occ_buf) = world.resource::<GpuOccupancyBuffer>().0.as_ref() {
+            //     render_context.command_encoder().clear_buffer(occ_buf, 0, None);
+            // }
 
             // Building stats buffer must not be cleared randomly inside the logic cycle.
             // Wait, building_stats is accumulated by recount AND logic. 
@@ -806,14 +806,14 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(spawn_wg_count, 1, 1);
             }
 
-            // 1. Mark Occupancy pass (to be read by movement pass)
-            pass.set_pipeline(occupancy_pipe);
+            // 1. Mark Occupancy pass (REMOVED - now merged into movement_pipe)
+            // pass.set_pipeline(occupancy_pipe);
             let p_wg_count = (params.people_count + 63) / 64;
-            if p_wg_count > 0 {
-                pass.dispatch_workgroups(p_wg_count, 1, 1);
-            }
+            // if p_wg_count > 0 {
+            //     pass.dispatch_workgroups(p_wg_count, 1, 1);
+            // }
 
-            // End occupancy pass to ensure it's written before movement pass starts
+            // End spawning pass
             drop(pass);
 
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
