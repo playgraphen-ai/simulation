@@ -10,7 +10,7 @@ pub struct MenuSettings {
 
 impl Default for MenuSettings {
     fn default() -> Self {
-        Self { grid_x: 6, grid_y: 5, population: 100000 }
+        Self { grid_x: 4, grid_y: 4, population: 300000 }
     }
 }
 
@@ -45,9 +45,9 @@ pub fn setup_menu(mut commands: Commands) {
             Node { margin: UiRect::bottom(Val::Px(40.0)), ..default() },
         ));
 
-        spawn_btn(p, "Small City (3x3 blocks, 50k pop)", MenuAction::Small);
-        spawn_btn(p, "Medium City (6x5 blocks, 100k pop)", MenuAction::Medium);
-        spawn_btn(p, "Large City (20x16 blocks, 130k pop)", MenuAction::Large);
+        spawn_btn(p, "Small City (3x3 blocks, 150k pop)", MenuAction::Small);
+        spawn_btn(p, "Medium City (6x5 blocks, 300k pop)", MenuAction::Medium);
+        spawn_btn(p, "Large City (20x16 blocks, 500k pop)", MenuAction::Large);
     });
 }
 
@@ -83,9 +83,9 @@ pub fn handle_menu_actions(
         match *interaction {
             Interaction::Pressed => {
                 match action {
-                    MenuAction::Small => { settings.grid_x = 3; settings.grid_y = 3; settings.population = 50000; }
-                    MenuAction::Medium => { settings.grid_x = 6; settings.grid_y = 5; settings.population = 100000; }
-                    MenuAction::Large => { settings.grid_x = 20; settings.grid_y = 16; settings.population = 130000; }
+                    MenuAction::Small => { settings.grid_x = 3; settings.grid_y = 3; settings.population = 150000; }
+                    MenuAction::Medium => { settings.grid_x = 6; settings.grid_y = 5; settings.population = 300000; }
+                    MenuAction::Large => { settings.grid_x = 20; settings.grid_y = 16; settings.population = 500000; }
                 }
                 if let Ok(e) = root.single() {
                     commands.entity(e).despawn();

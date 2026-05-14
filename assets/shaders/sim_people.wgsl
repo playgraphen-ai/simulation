@@ -224,7 +224,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
         let base_idx = pid * 512u;
         let current_step = u32(path_cursor);
         
-        let max_paths = 67108864u; // 131072 * 512
+        let max_paths = 268435456u; // 131072 * 512
         if base_idx + current_step >= max_paths {
             return;
         }
@@ -750,7 +750,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             // Reset path buffer for this person
             let path_idx = pid * 512u;
-            if path_idx < 67108864u { // 131072 * 512 = 67108864
+            if path_idx < 268435456u { // 131072 * 512 = 67108864
                 person_paths[path_idx] = 0xFFFFFFFFu;
             }
 
