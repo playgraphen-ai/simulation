@@ -342,8 +342,9 @@ impl bevy::render::render_graph::Node for GpuPathfindingNode {
             });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, bg, &[]);
-            // Let the GPU decide the number of workgroups based on the indirect buffer count_x
-            pass.dispatch_workgroups_indirect(buffers.requests.as_ref().unwrap(), 0);
+            // Distribute the workload over multiple frames to avoid GPU saturation.
+            // With 59 frames per cycle, we can process ~120k requests per cycle.
+            pass.dispatch_workgroups(2048, 1, 1);
         }
 
         if let Ok(tx) = world.resource::<crate::TimingsSender>().0.lock() {

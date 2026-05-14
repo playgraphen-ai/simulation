@@ -238,7 +238,7 @@ fn main(
         workgroupBarrier();
 
         // Major A* Iterations
-        for (var step: u32 = 0u; step < 256u; step = step + 1u) {
+        for (var step: u32 = 0u; step < 64u; step = step + 1u) {
             sort_open(lidx);
             if found != 0u || open_data[0] == 0xFFFFFFFFu { break; }
             if lidx == 0u { atomicStore(&next_len, 0u); }
@@ -361,7 +361,7 @@ fn main(
 
         // A* iterations. Window is 512, but we can iterate more if neighbors overlap.
         // However, set_prev_ht will fail once the table is full (512 unique nodes).
-        for (var step: u32 = 0u; step < params.max_path_len; step = step + 1u) {
+        for (var step: u32 = 0u; step < 32u; step = step + 1u) {
             sort_open(lidx);
 
             let is_found = atomicLoad(&found);
