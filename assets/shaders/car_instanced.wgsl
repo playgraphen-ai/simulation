@@ -44,27 +44,30 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     
     // Read from transforms_tex
     let t_w = 1024u;
-    let t_idx = pid * 4u;
+    let t_idx = pid * 2u;
     
     let tx0 = t_idx % t_w;
     let ty0 = t_idx / t_w;
-    let col0 = textureLoad(transforms_tex, vec2<i32>(i32(tx0), i32(ty0)), 0);
+    let pos_col = textureLoad(transforms_tex, vec2<i32>(i32(tx0), i32(ty0)), 0);
     
     let tx1 = (t_idx + 1u) % t_w;
     let ty1 = (t_idx + 1u) / t_w;
-    let col1 = textureLoad(transforms_tex, vec2<i32>(i32(tx1), i32(ty1)), 0);
+    let rot_col = textureLoad(transforms_tex, vec2<i32>(i32(tx1), i32(ty1)), 0);
     
-    let tx2 = (t_idx + 2u) % t_w;
-    let ty2 = (t_idx + 2u) / t_w;
-    let col2 = textureLoad(transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), 0);
-    
-    let tx3 = (t_idx + 3u) % t_w;
-    let ty3 = (t_idx + 3u) / t_w;
-    let pos_col = textureLoad(transforms_tex, vec2<i32>(i32(tx3), i32(ty3)), 0);
-    
-    let rot_matrix = mat3x3<f32>(col0.xyz, col1.xyz, col2.xyz);
     let world_pos = pos_col.xyz;
-    let is_white = col2.w;
+    let is_white = pos_col.w;
+
+    let d_x = rot_col.x;
+    let d_z = rot_col.y;
+    let r_x = rot_col.z;
+    let r_z = rot_col.w;
+
+    // Reconstruct 3x3 rotation matrix (assuming Y-up only rotation)
+    let rot_matrix = mat3x3<f32>(
+        r_x, 0.0, r_z,
+        0.0, 1.0, 0.0,
+        d_x, 0.0, d_z
+    );
 
     let local_pos = rot_matrix * vertex.position;
     let final_world = world_pos + local_pos;

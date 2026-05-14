@@ -171,21 +171,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let t_w = 1024u;
-    let t_idx = pid * 4u;
+    let t_idx = pid * 2u;
     
     let tx0 = t_idx % t_w;
     let ty0 = t_idx / t_w;
-    textureStore(car_transforms_tex, vec2<i32>(i32(tx0), i32(ty0)), vec4<f32>(rot_matrix[0], 0.0));
+    textureStore(car_transforms_tex, vec2<i32>(i32(tx0), i32(ty0)), vec4<f32>(world_pos.x, world_pos.y, world_pos.z, is_white));
     
     let tx1 = (t_idx + 1u) % t_w;
     let ty1 = (t_idx + 1u) / t_w;
-    textureStore(car_transforms_tex, vec2<i32>(i32(tx1), i32(ty1)), vec4<f32>(rot_matrix[1], 0.0));
-    
-    let tx2 = (t_idx + 2u) % t_w;
-    let ty2 = (t_idx + 2u) / t_w;
-    textureStore(car_transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), vec4<f32>(rot_matrix[2], is_white)); // Pack is_white flag in W of 3rd col
-    
-    let tx3 = (t_idx + 3u) % t_w;
-    let ty3 = (t_idx + 3u) / t_w;
-    textureStore(car_transforms_tex, vec2<i32>(i32(tx3), i32(ty3)), vec4<f32>(world_pos, 1.0));
+    textureStore(car_transforms_tex, vec2<i32>(i32(tx1), i32(ty1)), vec4<f32>(rot_matrix[2].x, rot_matrix[2].z, rot_matrix[0].x, rot_matrix[0].z));
 }
