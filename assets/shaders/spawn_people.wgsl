@@ -115,6 +115,11 @@ fn rand(state: ptr<function, u32>) -> f32 {
     return f32(x) / 4294967296.0;
 }
 
+const ACT_TRAVEL: f32 = 0.0;
+const ACT_HOME:   f32 = 1.0;
+const ACT_WORK:   f32 = 2.0;
+const ACT_SHOP:   f32 = 3.0;
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let request_idx = gid.x;
@@ -192,35 +197,75 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
 
+    // 3. Roll for initial activity
+    let total_time = params.home_duration + (params.home_to_work_prob * params.work_duration) + ((1.0 - params.home_to_work_prob) * params.shop_duration);
+    let roll = rand(&rng_state) * total_time;
+    
+    var activity = ACT_HOME;
+    var activity_time = rand(&rng_state) * params.home_duration;
+    var current_bid = home_id;
+    
+    if roll > params.home_duration {
+        if roll < params.home_duration + (params.home_to_work_prob * params.work_duration) {
+            activity = ACT_WORK;
+            activity_time = rand(&rng_state) * params.work_duration;
+            current_bid = work_id;
+        } else {
+            // Find a Shop
+            var found_shop = false;
+            for (var i = 0u; i < 50u; i = i + 1u) {
+                let bid = u32(rand(&rng_state) * f32(params.buildings_count));
+                let coords = building_coords(bid);
+                let tex0 = textureLoad(buildings_tex, coords[0]);
+                let tex1 = textureLoad(buildings_tex, coords[1]);
+                if tex0.z == 2.0 && tex1.z > 0.0 {
+                    current_bid = bid;
+                    found_shop = true;
+                    break;
+                }
+            }
+            if found_shop {
+                activity = ACT_SHOP;
+                activity_time = rand(&rng_state) * params.shop_duration;
+            } else {
+                // Fallback to home
+                activity = ACT_HOME;
+                activity_time = rand(&rng_state) * params.home_duration;
+                current_bid = home_id;
+            }
+        }
+    }
 
-    // 3. Initialize Person
+    // 4. Initialize Person
     let p_coords = person_coords(pid);
-    let home_coords = building_coords(home_id);
-    let h_tex1 = textureLoad(buildings_tex, home_coords[1]);
-    let h_tex2 = textureLoad(buildings_tex, home_coords[2]);
-    let home_seg_orig = h_tex1.w;
-    let home_t_orig = h_tex2.z;
+    
+    let curr_coords = building_coords(current_bid);
+    let c_tex1 = textureLoad(buildings_tex, curr_coords[1]);
+    let c_tex2 = textureLoad(buildings_tex, curr_coords[2]);
+    let start_seg = c_tex1.w;
+    let start_t = c_tex2.z;
 
-    let work_coords = building_coords(work_id);
-    let w_tex1 = textureLoad(buildings_tex, work_coords[1]);
-    let w_tex2 = textureLoad(buildings_tex, work_coords[2]);
-    let target_seg = w_tex1.w;
-    let target_t = w_tex2.z;
+    let target_b_coords = building_coords(u32(home_id)); // Default next destination
+    var target_seg = textureLoad(buildings_tex, target_b_coords[1]).w;
+    var target_t = textureLoad(buildings_tex, target_b_coords[2]).z;
+    
+    // If we are at home, next target depends on probability
+    if activity == ACT_HOME {
+        var next_dest = f32(work_id);
+        if rand(&rng_state) > params.home_to_work_prob {
+            // We don't have a shop assigned, so it will be picked when leaving home
+            // For now, target work or stay home.
+        }
+        let next_b_coords = building_coords(u32(next_dest));
+        target_seg = textureLoad(buildings_tex, next_b_coords[1]).w;
+        target_t = textureLoad(buildings_tex, next_b_coords[2]).z;
+    }
 
     let money = 50.0 + rand(&rng_state) * 450.0;
-    let time_since_rent = rand(&rng_state) * 300.0;
 
-    // Start at home
-    let start_seg = home_seg_orig;
-    let start_t = home_t_orig;
-
-    // activity_code: 1.0 = Home (ACT_HOME)
-    // activity_time: staggered randomly
-    let activity_time = rand(&rng_state) * params.home_duration;
-    
-    let texel0 = vec4<f32>(money, -1.0, f32(home_id), f32(home_id));
-    let texel1 = vec4<f32>(f32(work_id), 1.0, activity_time, 0.0);
-    let texel2 = vec4<f32>(f32(start_seg), f32(start_seg), start_t, start_t);
+    let texel0 = vec4<f32>(money, -1.0, f32(current_bid), f32(home_id));
+    let texel1 = vec4<f32>(f32(work_id), activity, activity_time, 0.0);
+    let texel2 = vec4<f32>(f32(start_seg), f32(start_seg), start_t, target_t);
 
     textureStore(people_tex, p_coords[0], texel0);
     textureStore(people_tex, p_coords[1], texel1);
