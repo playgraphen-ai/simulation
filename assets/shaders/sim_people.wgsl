@@ -501,13 +501,6 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(people_tex, coords[0], texel0);
     textureStore(people_tex, coords[1], texel1);
     textureStore(people_tex, coords[2], texel2);
-
-    let is_car = (activity == ACT_TRAVEL || activity == ACT_ARRIVED);
-    if !was_car && is_car {
-        atomicAdd(&stats.live_car_count, 1u);
-    } else if was_car && !is_car {
-        atomicSub(&stats.live_car_count, 1u);
-    }
 }
 
 @compute @workgroup_size(1)
@@ -656,16 +649,16 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             textureStore(people_tex, coords[0], texel0);
             textureStore(people_tex, coords[1], texel1);
             textureStore(people_tex, coords[2], texel2);
-
-            let is_car = true; // activity set to ACT_TRAVEL
-            if !was_car && is_car { atomicAdd(&stats.live_car_count, 1u); }
-            else if was_car && !is_car { atomicSub(&stats.live_car_count, 1u); }
         } else {
-            if was_car { atomicSub(&stats.live_car_count, 1u); }
+            texel1.y = ACT_HOME;
+            texel1.z = params.home_duration;
+            textureStore(people_tex, coords[1], texel1);
         }
         return;
     } else if money == 0.0 {
-        if was_car { atomicSub(&stats.live_car_count, 1u); }
+        texel1.y = ACT_HOME;
+        texel1.z = params.home_duration;
+        textureStore(people_tex, coords[1], texel1);
         return;
     }
 
