@@ -81,7 +81,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     if is_white > 0.5 {
         out.color = vec3<f32>(1.0, 1.0, 1.0);
     } else {
-        let hue = fract(vertex.car_id * 0.6180339887);
+        let hue = fract(f32(pid) * 0.6180339887);
         out.color = hsv2rgb(vec3<f32>(hue, 0.8, 0.9));
     }
 
