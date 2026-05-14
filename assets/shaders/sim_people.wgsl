@@ -74,7 +74,7 @@ struct GpuStats {
     tax_income_total: atomic<u32>,
     tax_rent_total: atomic<u32>,
     tax_consumption_total: atomic<u32>,
-    _pad: u32,
+    live_car_count: atomic<u32>,
 };
 
 @group(0) @binding(0) var people_tex: texture_storage_2d<rgba32float, read_write>;
@@ -209,6 +209,8 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
     var texel0 = textureLoad(people_tex, coords[0]);
     var texel1 = textureLoad(people_tex, coords[1]);
     var texel2 = textureLoad(people_tex, coords[2]);
+
+    let was_car = (texel1.y == ACT_TRAVEL || texel1.y == ACT_ARRIVED);
 
     if texel0.x == 0.0 { return; } // Not spawned
 
@@ -499,6 +501,20 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(people_tex, coords[0], texel0);
     textureStore(people_tex, coords[1], texel1);
     textureStore(people_tex, coords[2], texel2);
+
+    let is_car = (activity == ACT_TRAVEL || activity == ACT_ARRIVED);
+    if !was_car && is_car {
+        atomicAdd(&stats.live_car_count, 1u);
+    } else if was_car && !is_car {
+        atomicSub(&stats.live_car_count, 1u);
+    }
+}
+
+@compute @workgroup_size(1)
+fn main_recalibrate_stats() {
+    if params.recount_slice == 0u {
+        atomicStore(&stats.live_car_count, atomicLoad(&stats.travelling_count));
+    }
 }
 
 @compute @workgroup_size(64)
@@ -510,6 +526,8 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
     var texel0 = textureLoad(people_tex, coords[0]);
     var texel1 = textureLoad(people_tex, coords[1]);
     var texel2 = textureLoad(people_tex, coords[2]);
+
+    let was_car = (texel1.y == ACT_TRAVEL || texel1.y == ACT_ARRIVED);
 
     // Statistics
     // atomicAdd(&stats.people_count, 1u);
@@ -638,9 +656,16 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             textureStore(people_tex, coords[0], texel0);
             textureStore(people_tex, coords[1], texel1);
             textureStore(people_tex, coords[2], texel2);
+
+            let is_car = true; // activity set to ACT_TRAVEL
+            if !was_car && is_car { atomicAdd(&stats.live_car_count, 1u); }
+            else if was_car && !is_car { atomicSub(&stats.live_car_count, 1u); }
+        } else {
+            if was_car { atomicSub(&stats.live_car_count, 1u); }
         }
         return;
     } else if money == 0.0 {
+        if was_car { atomicSub(&stats.live_car_count, 1u); }
         return;
     }
 

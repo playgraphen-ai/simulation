@@ -149,7 +149,7 @@ pub struct GpuStats {
     pub tax_income_total: u32,
     pub tax_rent_total: u32,
     pub tax_consumption_total: u32,
-    pub _pad: u32,
+    pub live_car_count: u32,
 }
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -395,6 +395,7 @@ struct GpuSimPipeline {
     pub logic_pipeline: CachedComputePipelineId,
     pub buildings_pipeline: CachedComputePipelineId,
     pub recount_pipeline: CachedComputePipelineId,
+    pub recalibrate_pipeline: CachedComputePipelineId,
     pub occupancy_gc_clear_pipeline: CachedComputePipelineId,
     pub occupancy_gc_repopulate_pipeline: CachedComputePipelineId,
     pub update_roads_pipeline: CachedComputePipelineId,
@@ -609,6 +610,16 @@ impl FromWorld for GpuSimPipeline {
             zero_initialize_workgroup_memory: false,
         });
 
+        let recalibrate_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::Borrowed("gpu_sim_recalibrate_pipeline")),
+            layout: vec![layout_desc.clone()], 
+            push_constant_ranges: vec![],
+            shader: shader.clone(),
+            shader_defs: vec![],
+            entry_point: Some(Cow::Borrowed("main_recalibrate_stats")),
+            zero_initialize_workgroup_memory: false,
+        });
+
         let occupancy_gc_clear_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some(Cow::Borrowed("gpu_sim_occupancy_gc_clear_pipeline")),
             layout: vec![layout_desc.clone()], 
@@ -667,6 +678,7 @@ impl FromWorld for GpuSimPipeline {
             occupancy_pipeline,
             buildings_pipeline,
             recount_pipeline,
+            recalibrate_pipeline,
             occupancy_gc_clear_pipeline,
             occupancy_gc_repopulate_pipeline,
             update_roads_pipeline,
@@ -840,12 +852,13 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
         let readback = world.resource::<GpuReadbackBuffer>();
 
-        if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(gc_clear_pipe), Some(gc_repop_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(car_transform_pipe), Some(bg)) = (
+        if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(recalibrate_pipe), Some(gc_clear_pipe), Some(gc_repop_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(car_transform_pipe), Some(bg)) = (
             pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.buildings_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.recount_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.recalibrate_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_gc_clear_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_gc_repopulate_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.update_roads_pipeline),
@@ -881,6 +894,16 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             // Only clear the first 60 bytes of stats on the first slice of the recount!
             // (The rest of the buffer contains lifetime tax accumulators)
             if params.recount_slice == 0 {
+                // First, recalibrate live counter from previous recount result
+                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("gpu_sim_recalibrate_pass"),
+                    ..default()
+                });
+                pass.set_bind_group(0, bg, &[]);
+                pass.set_pipeline(recalibrate_pipe);
+                pass.dispatch_workgroups(1, 1, 1);
+                drop(pass);
+
                 if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
                     render_context.command_encoder().clear_buffer(stats_buf, 0, Some(60));
                 }
@@ -1190,7 +1213,7 @@ pub fn apply_gpu_readback(
             // If the recount says 0 people but we have people in the simulation, it's a partial state.
             if stats.people_count > 0 || people.len == 0 {
                 counters.people = stats.people_count;
-                counters.cars = stats.travelling_count;
+                counters.cars = stats.live_car_count;
                 counters.bankrupt = stats.bankrupt_count;
                 counters.res_occupants = stats.home_count;
                 counters.office_occupants = stats.work_count;
