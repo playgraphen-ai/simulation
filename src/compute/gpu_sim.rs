@@ -336,7 +336,7 @@ pub struct GpuSimParams {
     pub collisions_enabled: f32,
     pub recount_slice: u32,
     pub recount_slice_count: u32,
-    pub _pad0: u32,
+    pub do_occupancy_gc: u32,
 }
 
 impl Default for GpuSimParams {
@@ -380,7 +380,7 @@ impl Default for GpuSimParams {
             collisions_enabled: 1.0,
             recount_slice: 0,
             recount_slice_count: 5,
-            _pad0: 0,
+            do_occupancy_gc: 0,
         }
     }
 }
@@ -776,7 +776,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         ) {
             // --- OCCUPANCY GARBAGE COLLECTION ---
             // Periodically clear and re-populate the occupancy buffer to prevent "ghost cars"
-            if params.recount_slice == 0 {
+            if params.do_occupancy_gc > 0 {
                 let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                     label: Some("gpu_sim_occupancy_gc_pass"),
                     ..default()

@@ -23,6 +23,7 @@ use crate::AppState;
 
 #[derive(Serialize, Deserialize, Clone, Resource)]
 pub struct ScheduleConfig {
+    pub gc_frames: u32,
     pub buildings_frames: u32,
     pub people_logic_frames: u32,
     pub roads_frames: u32,
@@ -32,7 +33,7 @@ pub struct ScheduleConfig {
 
 impl Default for ScheduleConfig {
     fn default() -> Self {
-        Self { buildings_frames: 10, people_logic_frames: 10, roads_frames: 10, pathfind_frames: 59, stats_frames: 1 }
+        Self { gc_frames: 1, buildings_frames: 10, people_logic_frames: 10, roads_frames: 10, pathfind_frames: 59, stats_frames: 1 }
     }
 }
 
@@ -49,7 +50,7 @@ impl Default for SimScheduleState {
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        let cycle_frames = config.buildings_frames + config.people_logic_frames + config.roads_frames + config.pathfind_frames + config.stats_frames;
+        let cycle_frames = config.gc_frames + config.buildings_frames + config.people_logic_frames + config.roads_frames + config.pathfind_frames + config.stats_frames;
         Self { config, current_frame: 0, cycle_frames }
     }
 }
@@ -221,31 +222,38 @@ fn sync_gpu_textures_and_params(
     let c = &schedule.config;
     let mut frame = schedule.current_frame;
 
-    if frame < c.buildings_frames {
-        let f = frame;
-        let slice = (buildings.items.len() as u32 + c.buildings_frames - 1) / c.buildings_frames;
-        gpu_params.b_start = f * slice;
-        gpu_params.b_count = slice.min(buildings.items.len() as u32 - gpu_params.b_start.min(buildings.items.len() as u32));
+    if frame < c.gc_frames {
+        gpu_params.do_occupancy_gc = 1;
     } else {
-        frame -= c.buildings_frames;
-        if frame < c.people_logic_frames {
+        gpu_params.do_occupancy_gc = 0;
+        frame -= c.gc_frames;
+        
+        if frame < c.buildings_frames {
             let f = frame;
-            let slice = (people.len as u32 + c.people_logic_frames - 1) / c.people_logic_frames;
-            gpu_params.logic_start = f * slice;
-            gpu_params.logic_count = slice.min(people.len as u32 - gpu_params.logic_start.min(people.len as u32));
+            let slice = (buildings.items.len() as u32 + c.buildings_frames - 1) / c.buildings_frames;
+            gpu_params.b_start = f * slice;
+            gpu_params.b_count = slice.min(buildings.items.len() as u32 - gpu_params.b_start.min(buildings.items.len() as u32));
         } else {
-            frame -= c.people_logic_frames;
-            if frame < c.roads_frames {
+            frame -= c.buildings_frames;
+            if frame < c.people_logic_frames {
                 let f = frame;
-                let slice = (roads.segments.len() as u32 + c.roads_frames - 1) / c.roads_frames;
-                gpu_params.r_start = f * slice;
-                gpu_params.r_count = slice.min(roads.segments.len() as u32 - gpu_params.r_start.min(roads.segments.len() as u32));
+                let slice = (people.len as u32 + c.people_logic_frames - 1) / c.people_logic_frames;
+                gpu_params.logic_start = f * slice;
+                gpu_params.logic_count = slice.min(people.len as u32 - gpu_params.logic_start.min(people.len as u32));
             } else {
-                frame -= c.roads_frames;
-                if frame < c.pathfind_frames {
-                    path_params.do_dispatch = 1;
+                frame -= c.people_logic_frames;
+                if frame < c.roads_frames {
+                    let f = frame;
+                    let slice = (roads.segments.len() as u32 + c.roads_frames - 1) / c.roads_frames;
+                    gpu_params.r_start = f * slice;
+                    gpu_params.r_count = slice.min(roads.segments.len() as u32 - gpu_params.r_start.min(roads.segments.len() as u32));
                 } else {
-                    path_params.do_dispatch = 0;
+                    frame -= c.roads_frames;
+                    if frame < c.pathfind_frames {
+                        path_params.do_dispatch = 1;
+                    } else {
+                        path_params.do_dispatch = 0;
+                    }
                 }
             }
         }

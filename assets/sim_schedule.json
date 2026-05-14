@@ -1,4 +1,5 @@
 {
+  "gc_frames": 1,
   "buildings_frames": 20,
   "people_logic_frames": 20,
   "roads_frames": 20,
