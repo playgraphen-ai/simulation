@@ -198,7 +198,7 @@ fn sync_gpu_textures_and_params(
         path_params.reset_path_queue = 1;
         // Also flush pending spawns on the first frame of the cycle
         if pending.count > 0 {
-            let spawn_this_cycle = pending.count.min(1000);
+            let spawn_this_cycle = pending.count.min(5000);
             gpu_params.spawn_count = spawn_this_cycle;
             gpu_params.spawn_start_index = people.len.saturating_sub(pending.count);
             pending.count -= spawn_this_cycle;

@@ -534,7 +534,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
     var money = texel0.x;
     var rng_state = params.rng_seed + pid + 777u;
 
-    if money == 0.0 && params.buildings_count > 0u {
+    if money == 0.0 && params.buildings_count > 0u && texel0.w >= 0.0 {
         // --- RELEASE OLD BUILDINGS ---
         let old_home_f = texel0.w;
         let old_work_f = texel1.x;
@@ -620,31 +620,20 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let home_seg = h_tex1.w;
             let home_t = h_tex2.z;
 
-            let target_b_coords = building_coords(work_id);
-            let target_b_tex1 = textureLoad(buildings_tex, target_b_coords[1]);
-            let target_b_tex2 = textureLoad(buildings_tex, target_b_coords[2]);
-            let target_seg = u32(target_b_tex1.w);
-            let target_t = target_b_tex2.z;
-
-            // Start at the map edge
-            let start_seg = params.entry_seg;
-            let start_t = 0.0;
-
             let time_since_rent = rand(&rng_state) * 300.0;
-            texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, time_since_rent, f32(work_id), f32(home_id));
-            texel1 = vec4<f32>(f32(work_id), 0.0, -10.0, 0.0); // Travel, waiting for path
-            texel2 = vec4<f32>(f32(start_seg), f32(start_seg), start_t, target_t);
+            // Initialize AT HOME instead of entering from map edge
+            texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, time_since_rent, f32(home_id), f32(home_id));
+            texel1 = vec4<f32>(f32(work_id), ACT_HOME, params.home_duration * rand(&rng_state), 0.0);
+            texel2 = vec4<f32>(home_seg, home_seg, home_t, 0.0); // No target_t needed yet
             
             // Re-load variables for simulation
             money = texel0.x;
 
-            // --- QUEUE INITIAL PATH REQUEST ---
-            let req_idx = atomicAdd(&path_queue.count_x, 1u);
-            let max_queue = 131072u;
-            if req_idx < max_queue {
-                path_queue.requests[req_idx] = PathRequest(u32(start_seg), target_seg, pid, 0u);
-            }
+            // No path request needed yet
             person_paths[pid * 512u] = 0xFFFFFFFFu;
+            
+            // Register physical occupancy in the building
+            atomicAdd(&building_stats[home_id * 3u], 1u);
             
             textureStore(people_tex, coords[0], texel0);
             textureStore(people_tex, coords[1], texel1);
