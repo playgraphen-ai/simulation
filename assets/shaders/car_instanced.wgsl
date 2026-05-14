@@ -44,7 +44,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
     // Read from transforms_tex
     let t_w = 1024u;
-    let t_idx = pid * 2u;
+    let t_idx = pid * 4u;
 
     let tx0 = t_idx % t_w;
     let ty0 = t_idx / t_w;
@@ -91,8 +91,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     if is_white > 0.5 {
         out.color = vec3<f32>(1.0, 1.0, 1.0);
     } else {
-        let hue = fract(f32(pid) * 0.6180339887);
-        out.color = hsv2rgb(vec3<f32>(hue, 0.8, 0.9));
+        let tx2 = (t_idx + 2u) % t_w;
+        let ty2 = (t_idx + 2u) / t_w;
+        let color_col = textureLoad(transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), 0);
+        out.color = color_col.rgb;
     }
 
     return out;

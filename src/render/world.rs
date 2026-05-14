@@ -8,7 +8,7 @@ use bevy::prelude::*;
 use crate::sim::{
     buildings::{BuildingData, MAX_LEVEL},
     grid::{CityGrid, Tile, ZoneType},
-    roads::RoadData,
+    roads::{RoadData, RoadType},
 };
 
 pub struct WorldRenderPlugin;
@@ -27,10 +27,10 @@ pub struct WorldVisuals {
     pub road_mesh: Handle<Mesh>,
     pub mat_road: Handle<StandardMaterial>,
     pub mat_buildings: Handle<StandardMaterial>,
-    /// Per (btype, level) Scene handle.
-    pub residential_scenes: Vec<Handle<Scene>>, // 5
-    pub office_scenes: Vec<Handle<Scene>>,      // 5
-    pub shop_scenes: Vec<Handle<Scene>>,        // 5
+    /// Per (btype, level) Mesh handle.
+    pub residential_meshes: Vec<Handle<Mesh>>, // 5
+    pub office_meshes: Vec<Handle<Mesh>>,      // 5
+    pub shop_meshes: Vec<Handle<Mesh>>,        // 5
     pub road_scene: Handle<Scene>,
     pub car_scene: Handle<Scene>,
 }
@@ -160,16 +160,16 @@ fn build_palette(
         ..default()
     });
 
-    vis.residential_scenes = (0..=MAX_LEVEL)
-        .map(|lvl| asset_server.load(GltfAssetLabel::Scene(0)
+    vis.residential_meshes = (0..=MAX_LEVEL)
+        .map(|lvl| asset_server.load(GltfAssetLabel::Primitive { mesh: 0, primitive: 0 }
             .from_asset(format!("models/buildings/residential_{}.glb", lvl))))
         .collect();
-    vis.office_scenes = (0..=MAX_LEVEL)
-        .map(|lvl| asset_server.load(GltfAssetLabel::Scene(0)
+    vis.office_meshes = (0..=MAX_LEVEL)
+        .map(|lvl| asset_server.load(GltfAssetLabel::Primitive { mesh: 0, primitive: 0 }
             .from_asset(format!("models/buildings/office_{}.glb", lvl))))
         .collect();
-    vis.shop_scenes = (0..=MAX_LEVEL)
-        .map(|lvl| asset_server.load(GltfAssetLabel::Scene(0)
+    vis.shop_meshes = (0..=MAX_LEVEL)
+        .map(|lvl| asset_server.load(GltfAssetLabel::Primitive { mesh: 0, primitive: 0 }
             .from_asset(format!("models/buildings/shop_{}.glb", lvl))))
         .collect();
     
@@ -198,11 +198,11 @@ fn sync_building_view(
     buildings: Res<BuildingData>,
     grid: Res<CityGrid>,
     vis: Res<WorldVisuals>,
-    mut existing: Query<(Entity, &mut BuildingMarker, &mut SceneRoot, &mut Transform)>,
+    mut existing: Query<(Entity, &mut BuildingMarker, &mut Mesh3d, &mut Transform)>,
 ) {
     if !buildings.is_changed() { return; }
     let mut seen = std::collections::HashSet::new();
-    for (e, mut marker, mut scene, mut _tf) in &mut existing {
+    for (e, mut marker, mut mesh, mut _tf) in &mut existing {
         let id = marker.0 as usize;
         if id >= buildings.items.len() {
             commands.entity(e).despawn();
@@ -214,7 +214,7 @@ fn sync_building_view(
             continue;
         }
         if marker.1 != b.level {
-            scene.0 = scene_for(&vis, b.btype, b.level);
+            mesh.0 = mesh_for(&vis, b.btype, b.level);
             marker.1 = b.level;
         }
         seen.insert(marker.0);
@@ -230,7 +230,8 @@ fn sync_building_view(
         let offset = size / 2.0;
 
         commands.spawn((
-            SceneRoot(scene_for(&vis, b.btype, b.level)),
+            Mesh3d(mesh_for(&vis, b.btype, b.level)),
+            MeshMaterial3d(vis.mat_buildings.clone()),
             Transform::from_xyz(b.tile.0 as f32 + offset, elev, b.tile.1 as f32 + offset)
                 .with_scale(Vec3::splat(size)),
             BuildingMarker(id_u32, b.level),
@@ -239,12 +240,12 @@ fn sync_building_view(
     }
 }
 
-fn scene_for(vis: &WorldVisuals, bt: ZoneType, lvl: u32) -> Handle<Scene> {
+fn mesh_for(vis: &WorldVisuals, bt: ZoneType, lvl: u32) -> Handle<Mesh> {
     let lvl = (lvl as usize).min(MAX_LEVEL as usize);
     match bt {
-        ZoneType::Residential => vis.residential_scenes[lvl].clone(),
-        ZoneType::Office => vis.office_scenes[lvl].clone(),
-        ZoneType::Shop => vis.shop_scenes[lvl].clone(),
+        ZoneType::Residential => vis.residential_meshes[lvl].clone(),
+        ZoneType::Office => vis.office_meshes[lvl].clone(),
+        ZoneType::Shop => vis.shop_meshes[lvl].clone(),
     }
 }
 
@@ -253,66 +254,86 @@ fn sync_splat_map_system(
     roads: Res<RoadData>,
     splat_map_res: Option<Res<TerrainSplatMap>>,
     mut images: ResMut<Assets<Image>>,
+    mut local_data: Local<Vec<u8>>,
 ) {
     if !grid.is_changed() && !roads.is_changed() { return; }
-    if let Some(res) = splat_map_res {
-        if let Some(img) = images.get_mut(&res.0) {
-            let mut data = vec![0u8; (grid.width * grid.height * 4) as usize];
-            for y in 0..grid.height {
-                for x in 0..grid.width {
-                    let tile = grid.get(x, y);
-                    let idx = (y * grid.width + x) as usize * 4;
-                    
-                    match tile {
-                        Some(Tile::Road(seg_id)) => {
-                            if (seg_id as usize) < roads.segments.len() {
-                                let seg = &roads.segments[seg_id as usize];
-                                let rtype = seg.road_type;
-                                
-                                let dx = (seg.b.0 as i32 - seg.a.0 as i32).abs();
-                                let dy = (seg.b.1 as i32 - seg.a.1 as i32).abs();
-                                let is_v = dy > dx;
-                                
-                                let radius = match rtype {
-                                    crate::sim::roads::RoadType::Highway2x4 => 3,
-                                    crate::sim::roads::RoadType::Highway => 2,
-                                    crate::sim::roads::RoadType::Normal => 1,
-                                };
-                                
-                                let dist_a = (x as i32 - seg.a.0 as i32).abs().max((y as i32 - seg.a.1 as i32).abs());
-                                let dist_b = (x as i32 - seg.b.0 as i32).abs().max((y as i32 - seg.b.1 as i32).abs());
-                                let is_i = dist_a <= radius || dist_b <= radius;
+    let Some(res) = splat_map_res else { return; };
+    let Some(img) = images.get_mut(&res.0) else { return; };
 
-                                let variant = if is_i { 2 } else if is_v { 1 } else { 0 };
-                                let base = match rtype {
-                                    crate::sim::roads::RoadType::Normal => 1,
-                                    crate::sim::roads::RoadType::Highway => 4,
-                                    crate::sim::roads::RoadType::Highway2x4 => 7,
-                                };
-                                
-                                data[idx] = base + variant;
-                                data[idx + 1] = if is_v { (seg.a.0 % 256) as u8 } else { (seg.a.1 % 256) as u8 };
-                                data[idx + 2] = 0;
-                                data[idx + 3] = 255;
-                            }
-                        }
-                        Some(Tile::Zone(z)) => {
-                            data[idx] = 0;
-                            data[idx + 1] = 0;
-                            data[idx + 2] = match z {
-                                ZoneType::Residential => 1,
-                                ZoneType::Office => 2,
-                                ZoneType::Shop => 3,
-                            };
-                            data[idx + 3] = 255;
-                        }
-                        _ => {
-                            data[idx + 3] = 0;
-                        }
-                    }
+    let expected_len = (grid.width * grid.height * 4) as usize;
+    if local_data.len() != expected_len {
+        *local_data = vec![0u8; expected_len];
+    }
+    
+    let data = &mut *local_data;
+    let w = grid.width;
+    let h = grid.height;
+
+    for y in 0..h {
+        let row_offset = (y * w) as usize * 4;
+        for x in 0..w {
+            let idx = row_offset + (x as usize * 4);
+            let tile = grid.tiles[(y * w + x) as usize];
+            
+            match tile {
+                Tile::Road(seg_id) => {
+                    let seg = &roads.segments[seg_id as usize];
+                    let rtype = seg.road_type;
+                    
+                    let dx = (seg.b.0 as i32 - seg.a.0 as i32).abs();
+                    let dy = (seg.b.1 as i32 - seg.a.1 as i32).abs();
+                    let is_v = dy > dx;
+                    
+                    let radius = match rtype {
+                        RoadType::Highway2x4 => 3,
+                        RoadType::Highway => 2,
+                        RoadType::Normal => 1,
+                    };
+                    
+                    let dist_a = (x as i32 - seg.a.0 as i32).abs().max((y as i32 - seg.a.1 as i32).abs());
+                    let dist_b = (x as i32 - seg.b.0 as i32).abs().max((y as i32 - seg.b.1 as i32).abs());
+                    let is_i = dist_a <= radius || dist_b <= radius;
+
+                    let variant = if is_i { 2 } else if is_v { 1 } else { 0 };
+                    let base = match rtype {
+                        RoadType::Normal => 1,
+                        RoadType::Highway => 4,
+                        RoadType::Highway2x4 => 7,
+                    };
+                    
+                    data[idx] = base + variant;
+                    data[idx + 1] = if is_v { (seg.a.0 % 256) as u8 } else { (seg.a.1 % 256) as u8 };
+                    data[idx + 2] = 0;
+                    data[idx + 3] = 255;
+                }
+                Tile::Zone(z) => {
+                    data[idx] = 0;
+                    data[idx + 1] = 0;
+                    data[idx + 2] = match z {
+                        ZoneType::Residential => 1,
+                        ZoneType::Office => 2,
+                        ZoneType::Shop => 3,
+                    };
+                    data[idx + 3] = 255;
+                }
+                Tile::Building(_id) => {
+                    // Buildings also count as being on top of a zone or road usually,
+                    // but here we just keep the underlying visual if any, 
+                    // or clear it if it's a "Building" tile now.
+                    // Actually, buildings are rendered as 3D meshes, so we can clear the splat.
+                    data[idx] = 0;
+                    data[idx + 1] = 0;
+                    data[idx + 2] = 0;
+                    data[idx + 3] = 0;
+                }
+                _ => {
+                    data[idx] = 0;
+                    data[idx + 1] = 0;
+                    data[idx + 2] = 0;
+                    data[idx + 3] = 0;
                 }
             }
-            img.data = Some(data);
         }
     }
+    img.data = Some(local_data.clone());
 }

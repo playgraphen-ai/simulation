@@ -28,6 +28,8 @@ pub fn update_counters_system(
     buildings: Res<crate::sim::buildings::BuildingData>,
     mut counters: ResMut<SimCounters>,
 ) {
+    if !roads.is_changed() && !buildings.is_changed() { return; }
+    
     counters.road_segments = roads.segments.len() as u32;
     
     let mut res = 0;

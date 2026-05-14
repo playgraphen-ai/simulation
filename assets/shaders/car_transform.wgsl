@@ -50,6 +50,12 @@ struct CarMaterialParams {
 @group(0) @binding(12) var car_transforms_tex: texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(13) var elevations_sampler: sampler;
 
+fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
+    let K = vec4<f32>(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    let p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, vec3<f32>(0.0), vec3<f32>(1.0)), c.y);
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let pid = global_id.x;
@@ -171,7 +177,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let t_w = 1024u;
-    let t_idx = pid * 2u;
+    let t_idx = pid * 4u; // Each car now takes 4 texels for alignment and extra data
     
     let tx0 = t_idx % t_w;
     let ty0 = t_idx / t_w;
@@ -180,4 +186,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let tx1 = (t_idx + 1u) % t_w;
     let ty1 = (t_idx + 1u) / t_w;
     textureStore(car_transforms_tex, vec2<i32>(i32(tx1), i32(ty1)), vec4<f32>(rot_matrix[2].x, rot_matrix[2].z, rot_matrix[0].x, rot_matrix[0].z));
+
+    let tx2 = (t_idx + 2u) % t_w;
+    let ty2 = (t_idx + 2u) / t_w;
+    let hue = fract(f32(pid) * 0.6180339887);
+    let color = hsv2rgb(vec3<f32>(hue, 0.8, 0.9));
+    textureStore(car_transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), vec4<f32>(color.r, color.g, color.b, 1.0));
 }
