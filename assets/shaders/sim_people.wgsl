@@ -919,3 +919,81 @@ fn main_recount_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
     atomicAdd(&stats.total_money, total_money);
     atomicAdd(&stats.bankrupt_count, bankrupt);
 }
+
+@compute @workgroup_size(64)
+fn main_occupancy_gc_clear(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= params.grid_w * params.grid_h { return; }
+    atomicStore(&occupancy[idx], 0u);
+}
+
+@compute @workgroup_size(64)
+fn main_occupancy_gc_repopulate(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let pid = gid.x;
+    if pid >= params.people_count { return; }
+
+    let coords = person_coords(pid);
+    var texel0 = textureLoad(people_tex, coords[0]);
+    let texel1 = textureLoad(people_tex, coords[1]);
+    let texel2 = textureLoad(people_tex, coords[2]);
+
+    if texel0.x == 0.0 { return; } // Not spawned
+
+    let activity = texel1.y;
+    let current_seg = u32(texel2.x);
+    let prev_seg = texel2.y;
+    let activity_time = texel1.z;
+
+    if activity == ACT_TRAVEL && current_seg != 0xFFFFFFFFu {
+        let r_coords = road_coords(current_seg);
+        let r_tex0 = textureLoad(roads_tex, r_coords[0]);
+        let r_tex1 = textureLoad(roads_tex, r_coords[1]);
+        let r_tex4 = textureLoad(roads_tex, r_coords[4]);
+        let rtype = r_tex4.x;
+        let seg_len = max(0.5, r_tex1.w);
+
+        var start_at_b = false;
+        if prev_seg >= 1000000.0 { start_at_b = true; }
+
+        var frac = 0.0;
+        if activity_time < 0.0 {
+            frac = texel2.z; // start_t
+        } else {
+            let rem = clamp(activity_time / seg_len, 0.0, 1.0);
+            if start_at_b { frac = rem; } else { frac = 1.0 - rem; }
+        }
+
+        let ax = r_tex0.x; let ay = r_tex0.y;
+        let bx = r_tex0.z; let by = r_tex0.w;
+        let dir = normalize(vec2<f32>(bx - ax, by - ay));
+        let side = vec2<f32>(-dir.y, dir.x);
+        
+        var offset = select(0.35, -0.35, start_at_b);
+        if rtype == 1.0 {
+            let lane = f32(pid % 2u);
+            let lane_offset = 0.5 + lane * 1.0;
+            offset = select(lane_offset, -lane_offset, start_at_b);
+        } else if rtype == 2.0 {
+            let lane = f32(pid % 4u);
+            let lane_offset = 0.5 + lane * 0.675;
+            offset = select(lane_offset, -lane_offset, start_at_b);
+        }
+        
+        let pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), frac) + side * offset;
+        let tx = u32(pos.x + 0.5);
+        let ty = u32(pos.y + 0.5);
+        
+        let idx = tx + ty * params.grid_w;
+        if idx < params.grid_w * params.grid_h {
+            atomicStore(&occupancy[idx], 1u);
+            texel0.y = f32(idx);
+            textureStore(people_tex, coords[0], texel0);
+        }
+    } else {
+        // Not on road, ensure reserved_idx is reset
+        if texel0.y != -1.0 {
+            texel0.y = -1.0;
+            textureStore(people_tex, coords[0], texel0);
+        }
+    }
+}

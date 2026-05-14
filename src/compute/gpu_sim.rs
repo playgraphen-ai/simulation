@@ -392,6 +392,8 @@ struct GpuSimPipeline {
     pub logic_pipeline: CachedComputePipelineId,
     pub buildings_pipeline: CachedComputePipelineId,
     pub recount_pipeline: CachedComputePipelineId,
+    pub occupancy_gc_clear_pipeline: CachedComputePipelineId,
+    pub occupancy_gc_repopulate_pipeline: CachedComputePipelineId,
     pub update_roads_pipeline: CachedComputePipelineId,
     pub spawn_pipeline: CachedComputePipelineId,
     pub bind_group_layout: BindGroupLayout,
@@ -563,6 +565,26 @@ impl FromWorld for GpuSimPipeline {
             zero_initialize_workgroup_memory: false,
         });
 
+        let occupancy_gc_clear_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::Borrowed("gpu_sim_occupancy_gc_clear_pipeline")),
+            layout: vec![layout_desc.clone()], 
+            push_constant_ranges: vec![],
+            shader: shader.clone(),
+            shader_defs: vec![],
+            entry_point: Some(Cow::Borrowed("main_occupancy_gc_clear")),
+            zero_initialize_workgroup_memory: false,
+        });
+
+        let occupancy_gc_repopulate_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::Borrowed("gpu_sim_occupancy_gc_repopulate_pipeline")),
+            layout: vec![layout_desc.clone()], 
+            push_constant_ranges: vec![],
+            shader: shader.clone(),
+            shader_defs: vec![],
+            entry_point: Some(Cow::Borrowed("main_occupancy_gc_repopulate")),
+            zero_initialize_workgroup_memory: false,
+        });
+
         let update_roads_shader = world.resource::<GpuUpdateRoadsShader>().0.clone();
         let update_roads_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
             label: Some(Cow::Borrowed("gpu_sim_update_roads_pipeline")),
@@ -590,6 +612,8 @@ impl FromWorld for GpuSimPipeline {
             occupancy_pipeline,
             buildings_pipeline,
             recount_pipeline,
+            occupancy_gc_clear_pipeline,
+            occupancy_gc_repopulate_pipeline,
             update_roads_pipeline,
             logic_pipeline,
             spawn_pipeline,
@@ -738,16 +762,41 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
         let readback = world.resource::<GpuReadbackBuffer>();
 
-        if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(bg)) = (
+        if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(gc_clear_pipe), Some(gc_repop_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(bg)) = (
             pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.buildings_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.recount_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_gc_clear_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_gc_repopulate_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.update_roads_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.spawn_pipeline),
             bind_group
         ) {
+            // --- OCCUPANCY GARBAGE COLLECTION ---
+            // Periodically clear and re-populate the occupancy buffer to prevent "ghost cars"
+            if params.recount_slice == 0 {
+                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("gpu_sim_occupancy_gc_pass"),
+                    ..default()
+                });
+                pass.set_bind_group(0, bg, &[]);
+                
+                // 1. Clear the entire grid
+                pass.set_pipeline(gc_clear_pipe);
+                let grid_wg_count = (params.grid_w * params.grid_h + 63) / 64;
+                pass.dispatch_workgroups(grid_wg_count, 1, 1);
+
+                // 2. Re-populate with current vehicle positions
+                pass.set_pipeline(gc_repop_pipe);
+                let p_wg_count = (params.people_count + 63) / 64;
+                if p_wg_count > 0 {
+                    pass.dispatch_workgroups(p_wg_count, 1, 1);
+                }
+                drop(pass);
+            }
+
             // --- CLEAR PASS ---
             // Clear recount stats before any logic logic
             // Only clear the first 60 bytes of stats on the first slice of the recount!
