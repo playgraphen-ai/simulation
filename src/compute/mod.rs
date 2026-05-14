@@ -215,10 +215,12 @@ fn sync_gpu_textures_and_params(
     gpu_params.b_count = 0;
     gpu_params.logic_count = 0;
     gpu_params.r_count = 0;
-    
+    gpu_params.recount_slice = schedule.current_frame % 5;
+    gpu_params.recount_slice_count = 5;
+
     let c = &schedule.config;
     let mut frame = schedule.current_frame;
-    
+
     if frame < c.buildings_frames {
         let f = frame;
         let slice = (buildings.items.len() as u32 + c.buildings_frames - 1) / c.buildings_frames;
@@ -249,18 +251,19 @@ fn sync_gpu_textures_and_params(
         }
     }
 
-    if schedule.current_frame == 0 {
+    // Reset stats only at the beginning of the recount cycle
+    if gpu_params.recount_slice == 0 {
         gpu_params.reset_stats = 1;
     } else {
         gpu_params.reset_stats = 0;
     }
 
-    if schedule.current_frame >= schedule.cycle_frames - c.stats_frames {
+    // Readback only at the end of the recount cycle
+    if gpu_params.recount_slice == 4 {
         gpu_params.do_stats_readback = 1;
     } else {
         gpu_params.do_stats_readback = 0;
     }
-
     path_params.roads_tex_w = roads.tex_width;
     path_params.segments_count = roads.segments.len() as u32;
     path_params.max_path_len = 256;

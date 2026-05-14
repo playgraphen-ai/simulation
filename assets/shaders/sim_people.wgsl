@@ -35,9 +35,9 @@ struct SimParams {
     grid_h: u32,
     entry_seg: u32,
     collisions_enabled: f32,
+    recount_slice: u32,
+    recount_slice_count: u32,
     _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
 };
 
 struct PathRequest {
@@ -814,8 +814,19 @@ fn main_buildings(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 @compute @workgroup_size(64)
 fn main_recount_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let start_pid = gid.x * 1000u;
-    if start_pid >= params.people_count { return; }
+    let slice_count = params.recount_slice_count;
+    let slice_idx = params.recount_slice;
+    
+    let total_people = params.people_count;
+    let slice_size = (total_people + slice_count - 1u) / slice_count;
+    
+    let slice_start_pid = slice_idx * slice_size;
+    let slice_end_pid = min(total_people, (slice_idx + 1u) * slice_size);
+    
+    let chunk_size = 64u;
+    let thread_start_pid = slice_start_pid + gid.x * chunk_size;
+    
+    if thread_start_pid >= slice_end_pid { return; }
 
     var p_count = 0u;
     var h_count = 0u;
@@ -825,9 +836,9 @@ fn main_recount_stats(@builtin(global_invocation_id) gid: vec3<u32>) {
     var total_money = 0u;
     var bankrupt = 0u;
 
-    for (var i = 0u; i < 1000u; i = i + 1u) {
-        let pid = start_pid + i;
-        if pid >= params.people_count { break; }
+    for (var i = 0u; i < chunk_size; i = i + 1u) {
+        let pid = thread_start_pid + i;
+        if pid >= slice_end_pid { break; }
 
         let coords = person_coords(pid);
         let tex0 = textureLoad(people_tex, coords[0]);

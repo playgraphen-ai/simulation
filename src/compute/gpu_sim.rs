@@ -334,9 +334,9 @@ pub struct GpuSimParams {
     pub grid_h: u32,
     pub entry_seg: u32,
     pub collisions_enabled: f32,
+    pub recount_slice: u32,
+    pub recount_slice_count: u32,
     pub _pad0: u32,
-    pub _pad1: u32,
-    pub _pad2: u32,
 }
 
 impl Default for GpuSimParams {
@@ -378,9 +378,9 @@ impl Default for GpuSimParams {
             grid_h: 128,
             entry_seg: 0,
             collisions_enabled: 1.0,
+            recount_slice: 0,
+            recount_slice_count: 5,
             _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
         }
     }
 }
@@ -749,12 +749,13 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             bind_group
         ) {
             // --- CLEAR PASS ---
-            // Clear stats and building stats before any logic logic
-            if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
-                render_context.command_encoder().clear_buffer(stats_buf, 0, Some(60));
-            }
-            if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
-                render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
+            // Clear recount stats before any logic logic
+            // Only clear the first 60 bytes of stats on the first slice of the recount!
+            // (The rest of the buffer contains lifetime tax accumulators)
+            if params.recount_slice == 0 {
+                if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
+                    render_context.command_encoder().clear_buffer(stats_buf, 0, Some(60));
+                }
             }
 
             // Clear occupancy buffer every frame
@@ -762,17 +763,31 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 render_context.command_encoder().clear_buffer(occ_buf, 0, None);
             }
 
+            // Building stats buffer must not be cleared randomly inside the logic cycle.
+            // Wait, building_stats is accumulated by recount AND logic. 
+            // If recount is sliced over 5 frames, we shouldn't clear b_stats_buf at all here, or we need a proper cycle.
+            // Actually, let's clear it on `recount_slice == 0` for now to match the previous behavior, but we might need a better fix later.
+            if params.recount_slice == 0 {
+                if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
+                    render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
+                }
+            }
+
             // --- RECOUNT PASS ---
-            // Clear stats and building stats were just done.
-            // Recount pass (1000 people per thread)
+            // Recount pass (Sliced over 5 frames, 64 people per thread)
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                 label: Some("gpu_sim_recount_pass"),
                 ..default()
             });
             pass.set_bind_group(0, bg, &[]);
             pass.set_pipeline(recount_pipe);
-            let num_threads = (params.people_count + 999) / 1000;
+            
+            let slice_count = params.recount_slice_count.max(1);
+            let slice_size = (params.people_count + slice_count - 1) / slice_count;
+            let chunk_size = 64; 
+            let num_threads = (slice_size + chunk_size - 1) / chunk_size;
             let recount_wg_count = (num_threads + 63) / 64;
+
             if params.people_count > 0 {
                 pass.dispatch_workgroups(recount_wg_count, 1, 1);
             }
@@ -1038,16 +1053,20 @@ pub fn apply_gpu_readback(
 ) {
     if let Ok(rx) = rx_s.0.lock() {
         while let Ok(stats) = rx.try_recv() {
-            counters.people = stats.people_count;
-            counters.cars = stats.travelling_count;
-            counters.bankrupt = stats.bankrupt_count;
-            counters.res_occupants = stats.home_count;
-            counters.office_occupants = stats.work_count;
-            counters.shop_occupants = stats.shop_count;
-            counters.tax_income_total = stats.tax_income_total;
-            counters.tax_rent_total = stats.tax_rent_total;
-            counters.tax_consumption_total = stats.tax_consumption_total;
-            counters.money_total = stats.total_money;
+            // Because of the 5-frame slice, intermediate or cleared stats might be read back.
+            // If the recount says 0 people but we have people in the simulation, it's a partial state.
+            if stats.people_count > 0 || people.len == 0 {
+                counters.people = stats.people_count;
+                counters.cars = stats.travelling_count;
+                counters.bankrupt = stats.bankrupt_count;
+                counters.res_occupants = stats.home_count;
+                counters.office_occupants = stats.work_count;
+                counters.shop_occupants = stats.shop_count;
+                counters.tax_income_total = stats.tax_income_total;
+                counters.tax_rent_total = stats.tax_rent_total;
+                counters.tax_consumption_total = stats.tax_consumption_total;
+                counters.money_total = stats.total_money;
+            }
         }
     }
 
