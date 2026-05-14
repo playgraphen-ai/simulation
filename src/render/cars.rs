@@ -28,7 +28,10 @@ impl Plugin for CarsRenderPlugin {
 }
 
 #[derive(Resource, Default)]
-struct CarsSetup(bool);
+struct CarsSetup {
+    capacity: u32,
+    entity: Option<Entity>,
+}
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct CarInstancedMaterial {
@@ -84,8 +87,20 @@ fn setup_cars(
     grid: Option<Res<crate::sim::grid::CityGrid>>,
     mut setup: ResMut<CarsSetup>,
 ) {
-    if setup.0 { return; }
     if let (Some(dt), Some(people), Some(roads), Some(grid)) = (dt, people, roads, grid) {
+        if people.len <= setup.capacity && setup.capacity > 0 {
+            return; // We have enough capacity in the current mesh
+        }
+
+        // Initialize with actual population count instead of PEOPLE_CAPACITY
+        // We add a buffer of 1000 to avoid recreating the mesh too frequently
+        let initial_capacity = (people.len + 1000).max(1000).min(PEOPLE_CAPACITY);
+        setup.capacity = initial_capacity;
+
+        if let Some(entity) = setup.entity {
+            commands.entity(entity).despawn();
+        }
+
         let base_mesh = Cuboid::new(0.5, 0.3, 0.8).mesh().build();
         let mut positions: Vec<[f32; 3]> = Vec::new();
         let mut normals: Vec<[f32; 3]> = Vec::new();
@@ -96,7 +111,6 @@ fn setup_cars(
         let base_positions = base_mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap().as_float3().unwrap();
         let base_normals = base_mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap().as_float3().unwrap();
         
-        // In Bevy 0.18, we can use try_into to convert to Vec<[f32; 2]>
         let base_uvs_vec: Vec<[f32; 2]> = base_mesh.attribute(Mesh::ATTRIBUTE_UV_0).unwrap().clone().try_into().expect("Expected Float32x2 UVs");
         
         let base_indices: Vec<u32> = match base_mesh.indices().unwrap() {
@@ -104,7 +118,7 @@ fn setup_cars(
             bevy::mesh::Indices::U32(i) => i.clone(),
         };
 
-        for car_id in 0..PEOPLE_CAPACITY {
+        for car_id in 0..initial_capacity {
             let vertex_offset = positions.len() as u32;
             positions.extend(base_positions);
             normals.extend(base_normals);
@@ -136,13 +150,13 @@ fn setup_cars(
             road_points: dt.road_points.clone(),
         });
 
-        commands.spawn((
+        let entity = commands.spawn((
             Mesh3d(meshes.add(mega_mesh)),
             MeshMaterial3d(material),
             Transform::default(),
             NoFrustumCulling,
-        ));
-
-        setup.0 = true;
-        }
-        }
+        )).id();
+        
+        setup.entity = Some(entity);
+    }
+}
