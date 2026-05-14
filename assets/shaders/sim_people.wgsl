@@ -224,7 +224,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
         let base_idx = pid * 512u;
         let current_step = u32(path_cursor);
         
-        let max_paths = 33554432u; // 65536 * 512
+        let max_paths = 67108864u; // 131072 * 512
         if base_idx + current_step >= max_paths {
             return;
         }
@@ -629,7 +629,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             // --- QUEUE INITIAL PATH REQUEST ---
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
-            let max_queue = 65536u;
+            let max_queue = 131072u;
             if req_idx < max_queue {
                 path_queue.requests[req_idx] = PathRequest(u32(start_seg), target_seg, pid, 0u);
             }
@@ -743,14 +743,14 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             // Queue path request
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
-            let max_queue = 65536u;
+            let max_queue = 131072u;
             if req_idx < max_queue {
                 path_queue.requests[req_idx] = PathRequest(start_seg, target_seg, pid, 0u);
             }
 
             // Reset path buffer for this person
             let path_idx = pid * 512u;
-            if path_idx < 33554432u { // 65536 * 512 = 33554432
+            if path_idx < 67108864u { // 131072 * 512 = 67108864
                 person_paths[path_idx] = 0xFFFFFFFFu;
             }
 

@@ -13,7 +13,7 @@
 use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
-pub const PEOPLE_CAPACITY: u32 = 65536;
+pub const PEOPLE_CAPACITY: u32 = 131072;
 pub const TEXELS_PER_PERSON: u32 = 3;
 
 #[repr(C)]

@@ -228,7 +228,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     // Reset path buffer for this person
     let path_idx = pid * 512u;
-    if path_idx < 33554432u { // 65536 * 512
+    if path_idx < 67108864u { // 131072 * 512
         person_paths[path_idx] = 0xFFFFFFFFu;
     }
 }

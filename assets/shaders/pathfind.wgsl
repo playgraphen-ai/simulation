@@ -157,7 +157,7 @@ fn main(
     }
     workgroupBarrier();
     let req_id = shared_req_id;
-    let max_req = min(atomicLoad(&path_queue.count_x), 65536u);
+    let max_req = min(atomicLoad(&path_queue.count_x), 131072u);
 
     let is_valid_req = req_id < max_req;
     var req: PathRequest;
@@ -302,7 +302,7 @@ fn main(
 
         // Reconstruct Hierarchical Path
         if lidx == 0u {
-            let safe_person_id = min(req.person_id, 65535u);
+            let safe_person_id = min(req.person_id, 131071u);
             let base_path = safe_person_id * params.max_path_len;
             var cur = best_seg;
             var path_tmp: array<u32, 512>;
@@ -479,7 +479,7 @@ fn main(
 
         // Reconstruct path from best_seg.
         if lidx == 0u && is_valid_req {
-            let safe_person_id = min(req.person_id, 65535u);
+            let safe_person_id = min(req.person_id, 131071u);
             let base_path = safe_person_id * params.max_path_len;
 
             var cur = best_seg;

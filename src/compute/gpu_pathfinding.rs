@@ -214,14 +214,14 @@ fn prepare_path_buffers(
     major_graph: Res<ExtractedMajorGraph>,
     mut buffers: ResMut<GpuPathBuffers>,
 ) {
-    let max_reqs = 65536u32;
+    let max_reqs = 131072u32;
     buffers.max_requests = max_reqs;
 
     // IMPORTANT: Sync max_path_len to match the search window.
     params.max_path_len = 512;
     params.major_segments_count = major_graph.rows.len() as u32;
 
-    let people_capacity = 65536u64; // Max people
+    let people_capacity = 131072u64; // Max people
     let paths_size = people_capacity * 512u64 * 4u64; // 512 max path len * 4 bytes per id
     if buffers.paths.is_none() {
         let initial_data = vec![0xFFu8; paths_size as usize];
