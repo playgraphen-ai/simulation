@@ -46,6 +46,8 @@ pub struct CarInstancedMaterial {
     pub params: CarMaterialParams,
     #[texture(5, dimension = "2d")]
     pub road_points: Handle<Image>,
+    #[texture(6, dimension = "2d")]
+    pub transforms_tex: Handle<Image>,
 }
 
 #[derive(Clone, Default, ShaderType, Debug)]
@@ -148,6 +150,7 @@ fn setup_cars(
                 pad: 0,
             },
             road_points: dt.road_points.clone(),
+            transforms_tex: dt.car_transforms.clone(),
         });
 
         let entity = commands.spawn((

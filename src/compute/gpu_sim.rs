@@ -240,6 +240,7 @@ impl Plugin for GpuSimPlugin {
         let shader = app.world_mut().resource::<AssetServer>().load("shaders/sim_people.wgsl");
         let update_roads_shader = app.world_mut().resource::<AssetServer>().load("shaders/update_roads.wgsl");
         let spawn_shader = app.world_mut().resource::<AssetServer>().load("shaders/spawn_people.wgsl");
+        let car_transform_shader = app.world_mut().resource::<AssetServer>().load("shaders/car_transform.wgsl");
         let (tx_p, rx_p) = std::sync::mpsc::channel();
         let (tx_b, rx_b) = std::sync::mpsc::channel();
         let (tx_s, rx_s) = std::sync::mpsc::channel();
@@ -257,6 +258,7 @@ impl Plugin for GpuSimPlugin {
             .insert_resource(GpuSimShader(shader))
             .insert_resource(GpuUpdateRoadsShader(update_roads_shader))
             .insert_resource(GpuSpawnShader(spawn_shader))
+            .insert_resource(GpuCarTransformShader(car_transform_shader))
             .insert_resource(PeopleSender(Mutex::new(tx_p)))
             .insert_resource(BuildingsSender(Mutex::new(tx_b)))
             .insert_resource(StatsSender(Mutex::new(tx_s)))
@@ -293,6 +295,7 @@ pub struct GpuSimTextures {
     pub buildings: Option<Handle<Image>>,
     pub road_points: Option<Handle<Image>>,
     pub elevations: Option<Handle<Image>>,
+    pub car_transforms: Option<Handle<Image>>,
 }
 
 #[repr(C)]
@@ -396,8 +399,12 @@ struct GpuSimPipeline {
     pub occupancy_gc_repopulate_pipeline: CachedComputePipelineId,
     pub update_roads_pipeline: CachedComputePipelineId,
     pub spawn_pipeline: CachedComputePipelineId,
+    pub car_transform_pipeline: CachedComputePipelineId,
     pub bind_group_layout: BindGroupLayout,
 }
+
+#[derive(Resource)]
+struct GpuCarTransformShader(Handle<Shader>);
 
 impl FromWorld for GpuSimPipeline {
     fn from_world(world: &mut World) -> Self {
@@ -504,6 +511,43 @@ impl FromWorld for GpuSimPipeline {
                 },
                 count: None,
             },
+            // NEW BINDINGS FOR CAR TRANSFORMS
+            BindGroupLayoutEntry {
+                binding: 10,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Texture {
+                    sample_type: TextureSampleType::Float { filterable: true },
+                    view_dimension: TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 11,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Texture {
+                    sample_type: TextureSampleType::Float { filterable: true },
+                    view_dimension: TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 12,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::StorageTexture {
+                    access: StorageTextureAccess::ReadWrite,
+                    format: TextureFormat::Rgba32Float,
+                    view_dimension: TextureViewDimension::D2,
+                },
+                count: None,
+            },
+            BindGroupLayoutEntry {
+                binding: 13,
+                visibility: ShaderStages::COMPUTE,
+                ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                count: None,
+            },
         ];
 
         let layout = render_device.create_bind_group_layout(Some("gpu_sim_layout"), &entries);
@@ -607,6 +651,17 @@ impl FromWorld for GpuSimPipeline {
             zero_initialize_workgroup_memory: false,
         });
 
+        let car_transform_shader = world.resource::<GpuCarTransformShader>().0.clone();
+        let car_transform_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::Borrowed("gpu_sim_car_transform_pipeline")),
+            layout: vec![layout_desc.clone()], 
+            push_constant_ranges: vec![],
+            shader: car_transform_shader,
+            shader_defs: vec![],
+            entry_point: Some(Cow::Borrowed("main")),
+            zero_initialize_workgroup_memory: false,
+        });
+
         Self {
             people_pipeline,
             occupancy_pipeline,
@@ -617,6 +672,7 @@ impl FromWorld for GpuSimPipeline {
             update_roads_pipeline,
             logic_pipeline,
             spawn_pipeline,
+            car_transform_pipeline,
             bind_group_layout: layout,
         }
     }
@@ -711,7 +767,21 @@ fn queue_gpu_sim_bind_group(
     path_buffers: Res<crate::compute::gpu_pathfinding::GpuPathBuffers>,
     mut bind_group: ResMut<GpuSimBindGroup>,
 ) {
-    let (Some(people), Some(roads), Some(buildings), Some(params_buf), Some(path_req_buf), Some(paths_buf), Some(congestion_buf), Some(stats_buf), Some(occupancy_buf), Some(b_stats_buf)) = (
+    let (
+        Some(people), 
+        Some(roads), 
+        Some(buildings), 
+        Some(params_buf), 
+        Some(path_req_buf), 
+        Some(paths_buf), 
+        Some(congestion_buf), 
+        Some(stats_buf), 
+        Some(occupancy_buf), 
+        Some(b_stats_buf),
+        Some(road_pts),
+        Some(elevations),
+        Some(transforms)
+    ) = (
         textures.people.as_ref().and_then(|h| gpu_images.get(h)),
         textures.roads.as_ref().and_then(|h| gpu_images.get(h)),
         textures.buildings.as_ref().and_then(|h| gpu_images.get(h)),
@@ -722,6 +792,9 @@ fn queue_gpu_sim_bind_group(
         stats.0.as_ref(),
         occupancy.0.as_ref(),
         b_stats.0.as_ref(),
+        textures.road_points.as_ref().and_then(|h| gpu_images.get(h)),
+        textures.elevations.as_ref().and_then(|h| gpu_images.get(h)),
+        textures.car_transforms.as_ref().and_then(|h| gpu_images.get(h)),
     ) else { return; };
 
     let bg = render_device.create_bind_group(
@@ -738,6 +811,10 @@ fn queue_gpu_sim_bind_group(
             stats_buf.as_entire_binding(),
             occupancy_buf.as_entire_binding(),
             b_stats_buf.as_entire_binding(),
+            road_pts.texture_view.into_binding(),
+            elevations.texture_view.into_binding(),
+            transforms.texture_view.into_binding(),
+            elevations.sampler.into_binding(),
         )),
     );
     bind_group.0 = Some(bg);
@@ -762,7 +839,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
         let readback = world.resource::<GpuReadbackBuffer>();
 
-        if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(gc_clear_pipe), Some(gc_repop_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(bg)) = (
+        if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(gc_clear_pipe), Some(gc_repop_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(car_transform_pipe), Some(bg)) = (
             pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline),
@@ -772,6 +849,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_gc_repopulate_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.update_roads_pipeline),
             pipeline_cache.get_compute_pipeline(gpu_pipeline.spawn_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.car_transform_pipeline),
             bind_group
         ) {
             // --- OCCUPANCY GARBAGE COLLECTION ---
@@ -807,15 +885,6 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 }
             }
 
-            // Clear occupancy buffer every frame (REMOVED - now persistent via atomicExchange)
-            // if let Some(occ_buf) = world.resource::<GpuOccupancyBuffer>().0.as_ref() {
-            //     render_context.command_encoder().clear_buffer(occ_buf, 0, None);
-            // }
-
-            // Building stats buffer must not be cleared randomly inside the logic cycle.
-            // Wait, building_stats is accumulated by recount AND logic. 
-            // If recount is sliced over 5 frames, we shouldn't clear b_stats_buf at all here, or we need a proper cycle.
-            // Actually, let's clear it on `recount_slice == 0` for now to match the previous behavior, but we might need a better fix later.
             if params.recount_slice == 0 {
                 if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
                     render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
@@ -855,12 +924,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(spawn_wg_count, 1, 1);
             }
 
-            // 1. Mark Occupancy pass (REMOVED - now merged into movement_pipe)
-            // pass.set_pipeline(occupancy_pipe);
             let p_wg_count = (params.people_count + 63) / 64;
-            // if p_wg_count > 0 {
-            //     pass.dispatch_workgroups(p_wg_count, 1, 1);
-            // }
 
             // End spawning pass
             drop(pass);
@@ -873,6 +937,12 @@ impl bevy::render::render_graph::Node for GpuSimNode {
 
             // 2. People movement pass (every frame)
             pass.set_pipeline(movement_pipe);
+            if p_wg_count > 0 {
+                pass.dispatch_workgroups(p_wg_count, 1, 1);
+            }
+            
+            // 2b. Car transform pass (every frame) - uses the same thread counts as movement
+            pass.set_pipeline(car_transform_pipe);
             if p_wg_count > 0 {
                 pass.dispatch_workgroups(p_wg_count, 1, 1);
             }

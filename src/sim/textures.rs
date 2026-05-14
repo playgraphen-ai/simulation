@@ -14,6 +14,7 @@ pub struct DataTextures {
     pub buildings: Handle<Image>,
     pub elevations: Handle<Image>,
     pub road_points: Handle<Image>,
+    pub car_transforms: Handle<Image>,
 }
 
 pub fn create_data_textures(
@@ -24,12 +25,17 @@ pub fn create_data_textures(
     grid_w: u32,
     grid_h: u32,
 ) -> DataTextures {
+    // 4 texels per car (for a mat4x4). We can make it 1024 width.
+    let transforms_width = 1024u32;
+    let transforms_height = ((super::people::PEOPLE_CAPACITY * 4) + transforms_width - 1) / transforms_width;
+
     DataTextures {
         people: images.add(new_f32_texture(people.tex_width, people.tex_height, TextureFormat::Rgba32Float)),
         roads: images.add(new_f32_texture(roads.tex_width, roads.tex_height, TextureFormat::Rgba32Float)),
         buildings: images.add(new_f32_texture(buildings.tex_width, buildings.tex_height, TextureFormat::Rgba32Float)),
         elevations: images.add(new_f32_texture(grid_w, grid_h, TextureFormat::R32Float)),
         road_points: images.add(new_f32_texture(1024, 1024, TextureFormat::Rg32Float)),
+        car_transforms: images.add(new_f32_texture(transforms_width, transforms_height, TextureFormat::Rgba32Float)),
     }
 }
 
@@ -51,4 +57,5 @@ fn new_f32_texture(w: u32, h: u32, format: TextureFormat) -> Image {
         TextureUsages::COPY_DST | TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
     img
 }
+
 
