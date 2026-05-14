@@ -20,11 +20,21 @@ pub enum AppState {
     InGame,
 }
 
-#[derive(Resource)]
-pub struct TimingsSender(pub Mutex<Sender<(f32, f32)>>); // (compute_ms, render_ms)
+#[derive(Clone, Copy, Default, Debug)]
+pub struct TimingEvent {
+    pub total_compute: f32,
+    pub logic: f32,
+    pub bldg: f32,
+    pub road: f32,
+    pub pathfind: f32,
+    pub render: f32,
+}
 
 #[derive(Resource)]
-pub struct TimingsReceiver(pub Mutex<Receiver<(f32, f32)>>);
+pub struct TimingsSender(pub Mutex<Sender<TimingEvent>>);
+
+#[derive(Resource)]
+pub struct TimingsReceiver(pub Mutex<Receiver<TimingEvent>>);
 
 #[derive(Resource, Default, Clone)]
 pub struct DetailedTimings {
@@ -35,6 +45,21 @@ pub struct DetailedTimings {
     pub last_compute_ms: f32,
     pub last_render_ms: f32,
     
+    pub last_logic_ms: f32,
+    pub last_bldg_ms: f32,
+    pub last_road_ms: f32,
+    pub last_pathfind_ms: f32,
+    
+    // Smoothed values for UI
+    pub smooth_update_ms: f32,
+    pub smooth_compute_ms: f32,
+    pub smooth_render_ms: f32,
+    
+    pub smooth_logic_ms: f32,
+    pub smooth_bldg_ms: f32,
+    pub smooth_road_ms: f32,
+    pub smooth_pathfind_ms: f32,
+
     pub acc_update_ms: f32,
     pub acc_compute_ms: f32,
     pub acc_render_ms: f32,
@@ -106,6 +131,7 @@ fn main() {
 
     if let Some(render_app) = app.get_sub_app_mut(bevy::render::RenderApp) {
         render_app.insert_resource(TimingsSender(Mutex::new(tx)));
+        render_app.init_resource::<RenderRecordingTimer>();
         render_app.add_systems(bevy::render::ExtractSchedule, start_render_recording);
         render_app.add_systems(bevy::render::Render, end_render_recording.in_set(bevy::render::RenderSystems::Cleanup));
     }
@@ -116,17 +142,19 @@ fn main() {
 #[derive(Resource, Default)]
 struct RenderRecordingTimer(Option<Instant>);
 
-fn start_render_recording(mut timer: Local<RenderRecordingTimer>) {
+fn start_render_recording(mut timer: ResMut<RenderRecordingTimer>) {
     timer.0 = Some(Instant::now());
 }
 
 fn end_render_recording(
-    mut timer: Local<RenderRecordingTimer>,
+    mut timer: ResMut<RenderRecordingTimer>,
     tx: Res<TimingsSender>,
 ) {
     if let Some(start) = timer.0.take() {
         if let Ok(tx) = tx.0.lock() {
-            let _ = tx.send((0.0, start.elapsed().as_secs_f32() * 1000.0));
+            let mut event = TimingEvent::default();
+            event.render = start.elapsed().as_secs_f32() * 1000.0;
+            let _ = tx.send(event);
         }
     }
 }
@@ -138,6 +166,10 @@ fn start_timing(mut timings: ResMut<DetailedTimings>) {
     // Reset frame-local timings
     timings.last_compute_ms = 0.0;
     timings.last_render_ms = 0.0;
+    timings.last_logic_ms = 0.0;
+    timings.last_bldg_ms = 0.0;
+    timings.last_road_ms = 0.0;
+    timings.last_pathfind_ms = 0.0;
 }
 
 fn receive_timings(
@@ -145,14 +177,37 @@ fn receive_timings(
     mut timings: ResMut<DetailedTimings>,
 ) {
     if let Ok(rx) = receiver.0.lock() {
-        while let Ok((compute, render)) = rx.try_recv() {
-            if compute > 0.0 {
-                timings.last_compute_ms += compute;
-            }
-            if render > 0.0 {
-                timings.last_render_ms += render;
-            }
+        while let Ok(event) = rx.try_recv() {
+            if event.total_compute > 0.0 { timings.last_compute_ms += event.total_compute; }
+            if event.logic > 0.0 { timings.last_logic_ms += event.logic; }
+            if event.bldg > 0.0 { timings.last_bldg_ms += event.bldg; }
+            if event.road > 0.0 { timings.last_road_ms += event.road; }
+            if event.pathfind > 0.0 { timings.last_pathfind_ms += event.pathfind; }
+            if event.render > 0.0 { timings.last_render_ms += event.render; }
         }
+        
+        // Apply smoothing (EWMA)
+        let alpha = 0.1;
+        // Only smooth if there's actually a non-zero value this frame, 
+        // to avoid decaying to 0 during frames where a slice doesn't run.
+        if timings.last_compute_ms > 0.0 {
+            timings.smooth_compute_ms = timings.smooth_compute_ms * (1.0 - alpha) + timings.last_compute_ms * alpha;
+        }
+        if timings.last_logic_ms > 0.0 {
+            timings.smooth_logic_ms = timings.smooth_logic_ms * (1.0 - alpha) + timings.last_logic_ms * alpha;
+        }
+        if timings.last_bldg_ms > 0.0 {
+            timings.smooth_bldg_ms = timings.smooth_bldg_ms * (1.0 - alpha) + timings.last_bldg_ms * alpha;
+        }
+        if timings.last_road_ms > 0.0 {
+            timings.smooth_road_ms = timings.smooth_road_ms * (1.0 - alpha) + timings.last_road_ms * alpha;
+        }
+        if timings.last_pathfind_ms > 0.0 {
+            timings.smooth_pathfind_ms = timings.smooth_pathfind_ms * (1.0 - alpha) + timings.last_pathfind_ms * alpha;
+        }
+        
+        timings.smooth_render_ms = timings.smooth_render_ms * (1.0 - alpha) + timings.last_render_ms * alpha;
+
         timings.acc_compute_ms += timings.last_compute_ms;
         timings.acc_render_ms += timings.last_render_ms;
     }
@@ -161,6 +216,10 @@ fn receive_timings(
 fn end_update_timing(mut timings: ResMut<DetailedTimings>) {
     if let Some(start) = timings.update_start {
         timings.last_update_ms = start.elapsed().as_secs_f32() * 1000.0;
+        
+        let alpha = 0.1;
+        timings.smooth_update_ms = timings.smooth_update_ms * (1.0 - alpha) + timings.last_update_ms * alpha;
+        
         timings.acc_update_ms += timings.last_update_ms;
         timings.acc_frames += 1;
     }

@@ -76,8 +76,18 @@ pub fn update_perf_ui(
             let entities = diagnostics.get(&EntityCountDiagnosticsPlugin::ENTITY_COUNT).and_then(|d| d.smoothed()).unwrap_or(0.0);
             
             text.0 = format!(
-                "Frame: {:.1} ms\nCompute: {:.1} ms\nRender: {:.1} ms\nCPU: {:.1} %\nRAM: {:.0} MB\nEntities: {}",
-                frame_time, timings.last_compute_ms, timings.last_render_ms, cpu, ram, entities
+                "Frame: {:.1} ms\nLogic CPU: {:.1} ms\nCompute: {:.1} ms\n  - Logic: {:.3} ms\n  - Bldgs: {:.3} ms\n  - Roads: {:.3} ms\n  - Path: {:.3} ms\nRender: {:.1} ms\nCPU: {:.1} %\nRAM: {:.0} MB\nEntities: {}",
+                frame_time, 
+                timings.smooth_update_ms, 
+                timings.smooth_compute_ms, 
+                timings.smooth_logic_ms,
+                timings.smooth_bldg_ms,
+                timings.smooth_road_ms,
+                timings.smooth_pathfind_ms,
+                timings.smooth_render_ms, 
+                cpu, 
+                ram, 
+                entities
             );
         } else {
             node.display = Display::None;

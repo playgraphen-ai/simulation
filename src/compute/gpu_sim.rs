@@ -831,6 +831,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         world: &World,
     ) -> Result<(), NodeRunError> {
         let start = std::time::Instant::now();
+        let mut event = crate::TimingEvent::default();
         let pipeline_cache = world.resource::<PipelineCache>();
         let gpu_pipeline = world.resource::<GpuSimPipeline>();
         let bind_group = &world.resource::<GpuSimBindGroup>().0;
@@ -948,37 +949,49 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             }
             drop(pass);
 
-            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                label: Some("gpu_sim_logic_pass"),
-                ..default()
-            });
-            pass.set_bind_group(0, bg, &[]);
-
             // 3. People logic pass
             if params.logic_count > 0 {
+                let logic_start_time = std::time::Instant::now();
+                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("gpu_sim_logic_pass"),
+                    ..default()
+                });
+                pass.set_bind_group(0, bg, &[]);
                 pass.set_pipeline(logic_pipe);
                 let logic_wg_count = (params.logic_count + 63) / 64;
                 pass.dispatch_workgroups(logic_wg_count, 1, 1);
+                drop(pass);
+                event.logic = logic_start_time.elapsed().as_secs_f32() * 1000.0;
             }
-            drop(pass);
 
             // 5. Buildings pass (Updates textures from Recount results)
-            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                label: Some("gpu_sim_buildings_pass"),
-                ..default()
-            });
-            pass.set_bind_group(0, bg, &[]);
             if params.b_count > 0 {
+                let bldg_start_time = std::time::Instant::now();
+                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("gpu_sim_buildings_pass"),
+                    ..default()
+                });
+                pass.set_bind_group(0, bg, &[]);
                 pass.set_pipeline(build_pipe);
                 let b_wg_count = (params.b_count + 63) / 64;
                 pass.dispatch_workgroups(b_wg_count, 1, 1);
+                drop(pass);
+                event.bldg = bldg_start_time.elapsed().as_secs_f32() * 1000.0;
             }
 
             // 6. Update Roads pass
             if params.r_count > 0 {
+                let road_start_time = std::time::Instant::now();
+                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("gpu_sim_roads_pass"),
+                    ..default()
+                });
+                pass.set_bind_group(0, bg, &[]);
                 pass.set_pipeline(update_roads_pipe);
                 let r_wg_count = (params.r_count + 63) / 64;
                 pass.dispatch_workgroups(r_wg_count, 1, 1);
+                drop(pass);
+                event.road = road_start_time.elapsed().as_secs_f32() * 1000.0;
             }
         }
 
@@ -1056,7 +1069,8 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         }
 
         if let Ok(tx) = world.resource::<crate::TimingsSender>().0.lock() {
-            let _ = tx.send((start.elapsed().as_secs_f32() * 1000.0, 0.0));
+            event.total_compute = start.elapsed().as_secs_f32() * 1000.0;
+            let _ = tx.send(event);
         }
 
         Ok(())
