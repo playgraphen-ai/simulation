@@ -38,6 +38,12 @@ pub struct ToolButton(pub ActiveTool);
 #[derive(Component)]
 pub struct SpawnButton;
 
+#[derive(Component)]
+pub struct ToolbarToggleBtn;
+
+#[derive(Component)]
+pub struct ToolbarContent;
+
 /// Tagged sliders. Drag-click on them adjusts the corresponding value.
 #[derive(Component, Clone, Copy, Debug)]
 pub enum SliderKind {
@@ -77,37 +83,107 @@ pub fn setup_toolbar(mut commands: Commands, durations: Res<ActivityDurations>, 
         BackgroundColor(Color::srgba(0., 0., 0., 0.55)),
     ))
     .with_children(|p| {
-        label(p, "BUILD");
-        tool_button(p, "Road", ActiveTool::Road);
-        tool_button(p, "Highway", ActiveTool::Highway);
-        tool_button(p, "Highway 2x4", ActiveTool::Highway2x4);
-        tool_button(p, "Zone: Residential", ActiveTool::Zone(ZoneTag::Residential));
-        tool_button(p, "Zone: Office", ActiveTool::Zone(ZoneTag::Office));
-        tool_button(p, "Zone: Shop", ActiveTool::Zone(ZoneTag::Shop));
-        tool_button(p, "None (camera)", ActiveTool::None);
+        // Top bar with toggle button
+        p.spawn((
+            Node {
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect::bottom(Val::Px(4.)),
+                ..default()
+            },
+        )).with_children(|top_bar| {
+            top_bar.spawn((
+                Text::new("TOOLS"),
+                TextFont { font_size: 14.0, ..default() },
+                TextColor(Color::WHITE),
+            ));
+            
+            top_bar.spawn((
+                Button,
+                Node {
+                    padding: UiRect::horizontal(Val::Px(8.)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                ToolbarToggleBtn,
+            )).with_children(|btn| {
+                btn.spawn((
+                    Text::new("Hide"),
+                    TextFont { font_size: 12.0, ..default() },
+                    TextColor(Color::WHITE),
+                ));
+            });
+        });
 
-        label(p, "POPULATION");
-        spawn_button(p);
+        // Content
+        p.spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                display: Display::Flex,
+                row_gap: Val::Px(8.),
+                ..default()
+            },
+            ToolbarContent,
+        )).with_children(|content| {
+            label(content, "BUILD");
+            tool_button(content, "Road", ActiveTool::Road);
+            tool_button(content, "Highway", ActiveTool::Highway);
+            tool_button(content, "Highway 2x4", ActiveTool::Highway2x4);
+            tool_button(content, "Zone: Residential", ActiveTool::Zone(ZoneTag::Residential));
+            tool_button(content, "Zone: Office", ActiveTool::Zone(ZoneTag::Office));
+            tool_button(content, "Zone: Shop", ActiveTool::Zone(ZoneTag::Shop));
+            tool_button(content, "None (camera)", ActiveTool::None);
 
-        label(p, "ECONOMY & RULES");
-        slider_row(p, "Abandon x", SliderKind::AbandonMultiplier, 0.1, 5.0, settings.abandon_multiplier);
-        slider_row(p, "Rent Cost", SliderKind::RentCost, 0.0, 100.0, settings.rent_cost);
-        slider_row(p, "Work Pay", SliderKind::WorkSalary, 10.0, 200.0, settings.work_salary);
-        slider_row(p, "Shop Cost", SliderKind::ShopCost, 0.0, 100.0, settings.shop_cost);
-        slider_row(p, "Collisions", SliderKind::Collisions, 0.0, 1.0, settings.collisions_enabled);
+            label(content, "POPULATION");
+            spawn_button(content);
 
-        label(p, "TAXATION (%)");
-        slider_row(p, "Income Tax", SliderKind::TaxIncome, 0.0, 0.5, settings.tax_income);
-        slider_row(p, "Rent Tax", SliderKind::TaxRent, 0.0, 0.5, settings.tax_rent);
-        slider_row(p, "Shop Tax", SliderKind::TaxConsumption, 0.0, 0.5, settings.tax_consumption);
+            label(content, "ECONOMY & RULES");
+            slider_row(content, "Abandon x", SliderKind::AbandonMultiplier, 0.1, 5.0, settings.abandon_multiplier);
+            slider_row(content, "Rent Cost", SliderKind::RentCost, 0.0, 100.0, settings.rent_cost);
+            slider_row(content, "Work Pay", SliderKind::WorkSalary, 10.0, 200.0, settings.work_salary);
+            slider_row(content, "Shop Cost", SliderKind::ShopCost, 0.0, 100.0, settings.shop_cost);
+            slider_row(content, "Collisions", SliderKind::Collisions, 0.0, 1.0, settings.collisions_enabled);
 
-        label(p, "ACTIVITIES (s)");
+            label(content, "TAXATION (%)");
+            slider_row(content, "Income Tax", SliderKind::TaxIncome, 0.0, 0.5, settings.tax_income);
+            slider_row(content, "Rent Tax", SliderKind::TaxRent, 0.0, 0.5, settings.tax_rent);
+            slider_row(content, "Shop Tax", SliderKind::TaxConsumption, 0.0, 0.5, settings.tax_consumption);
 
-        slider_row(p, "Home", SliderKind::HomeDuration, 0.0, 300.0, durations.home);
-        slider_row(p, "Work", SliderKind::WorkDuration, 0.0, 300.0, durations.work);
-        slider_row(p, "Shop", SliderKind::ShopDuration, 0.0, 300.0, durations.shop);
-        slider_row(p, "P(home→work)", SliderKind::HomeToWorkProb, 0.0, 1.0, durations.home_to_work_prob);
+            label(content, "ACTIVITIES (s)");
+
+            slider_row(content, "Home", SliderKind::HomeDuration, 0.0, 300.0, durations.home);
+            slider_row(content, "Work", SliderKind::WorkDuration, 0.0, 300.0, durations.work);
+            slider_row(content, "Shop", SliderKind::ShopDuration, 0.0, 300.0, durations.shop);
+            slider_row(content, "P(home→work)", SliderKind::HomeToWorkProb, 0.0, 1.0, durations.home_to_work_prob);
+        });
     });
+}
+
+pub fn toggle_toolbar(
+    mut interaction_query: Query<(&Interaction, &Children), (Changed<Interaction>, With<ToolbarToggleBtn>)>,
+    mut text_query: Query<&mut Text>,
+    mut content_query: Query<&mut Node, With<ToolbarContent>>,
+) {
+    for (interaction, children) in &mut interaction_query {
+        if *interaction == Interaction::Pressed {
+            if let Ok(mut content_node) = content_query.single_mut() {
+                let is_hidden = content_node.display == Display::None;
+                
+                if is_hidden {
+                    content_node.display = Display::Flex;
+                    if let Ok(mut text) = text_query.get_mut(children[0]) {
+                        text.0 = "Hide".to_string();
+                    }
+                } else {
+                    content_node.display = Display::None;
+                    if let Ok(mut text) = text_query.get_mut(children[0]) {
+                        text.0 = "Show".to_string();
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn label(p: &mut ChildSpawnerCommands, s: &str) {

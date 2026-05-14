@@ -29,6 +29,12 @@ pub struct InspectorPanel;
 #[derive(Component)]
 pub struct InspectorText;
 
+#[derive(Component)]
+pub struct InspectorToggleBtn;
+
+#[derive(Component)]
+pub struct InspectorContent;
+
 pub fn setup_inspector(mut commands: Commands) {
     commands.spawn((
         Node {
@@ -37,19 +43,88 @@ pub fn setup_inspector(mut commands: Commands) {
             bottom: Val::Px(12.),
             width: Val::Px(280.),
             flex_direction: FlexDirection::Column,
-            padding: UiRect::all(Val::Px(12.)),
+            padding: UiRect::all(Val::Px(8.)),
             ..default()
         },
         BackgroundColor(Color::srgba(0.1, 0.1, 0.15, 0.9)),
         InspectorPanel,
     )).with_children(|p| {
+        // Top bar with toggle button
         p.spawn((
-            Text::new("INSPECTOR\n\nSelect 'None (camera)'\nClick on a car or building."),
-            TextFont { font_size: 14.0, ..default() },
-            TextColor(Color::WHITE),
-            InspectorText,
-        ));
+            Node {
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect::bottom(Val::Px(8.)),
+                ..default()
+            },
+        )).with_children(|top_bar| {
+            top_bar.spawn((
+                Text::new("INSPECTOR"),
+                TextFont { font_size: 14.0, ..default() },
+                TextColor(Color::WHITE),
+            ));
+            
+            top_bar.spawn((
+                Button,
+                Node {
+                    padding: UiRect::horizontal(Val::Px(8.)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 1.0)),
+                InspectorToggleBtn,
+            )).with_children(|btn| {
+                btn.spawn((
+                    Text::new("Hide"),
+                    TextFont { font_size: 12.0, ..default() },
+                    TextColor(Color::WHITE),
+                ));
+            });
+        });
+
+        // Content
+        p.spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                display: Display::Flex,
+                ..default()
+            },
+            InspectorContent,
+        )).with_children(|content| {
+            content.spawn((
+                Text::new("Select 'None (camera)'\nClick on a car or building."),
+                TextFont { font_size: 14.0, ..default() },
+                TextColor(Color::WHITE),
+                InspectorText,
+            ));
+        });
     });
+}
+
+pub fn toggle_inspector(
+    mut interaction_query: Query<(&Interaction, &Children), (Changed<Interaction>, With<InspectorToggleBtn>)>,
+    mut text_query: Query<&mut Text>,
+    mut content_query: Query<&mut Node, With<InspectorContent>>,
+) {
+    for (interaction, children) in &mut interaction_query {
+        if *interaction == Interaction::Pressed {
+            if let Ok(mut content_node) = content_query.single_mut() {
+                let is_hidden = content_node.display == Display::None;
+                
+                if is_hidden {
+                    content_node.display = Display::Flex;
+                    if let Ok(mut text) = text_query.get_mut(children[0]) {
+                        text.0 = "Hide".to_string();
+                    }
+                } else {
+                    content_node.display = Display::None;
+                    if let Ok(mut text) = text_query.get_mut(children[0]) {
+                        text.0 = "Show".to_string();
+                    }
+                }
+            }
+        }
+    }
 }
 
 pub fn handle_selection(

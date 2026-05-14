@@ -52,6 +52,7 @@ pub fn setup_perf_ui(mut commands: Commands) {
 
 pub fn update_perf_ui(
     diagnostics: Res<DiagnosticsStore>,
+    timings: Res<crate::DetailedTimings>,
     root_q: Query<&Interaction, With<PerfRoot>>,
     mut fps_q: Query<&mut Text, With<FpsText>>,
     mut details_q: Query<(&mut Text, &mut Node), (With<DetailsText>, Without<FpsText>)>,
@@ -75,8 +76,8 @@ pub fn update_perf_ui(
             let entities = diagnostics.get(&EntityCountDiagnosticsPlugin::ENTITY_COUNT).and_then(|d| d.smoothed()).unwrap_or(0.0);
             
             text.0 = format!(
-                "Frame: {:.1} ms\nCPU: {:.1} %\nRAM: {:.0} MB\nEntities: {}",
-                frame_time, cpu, ram, entities
+                "Frame: {:.1} ms\nCompute: {:.1} ms\nRender: {:.1} ms\nCPU: {:.1} %\nRAM: {:.0} MB\nEntities: {}",
+                frame_time, timings.last_compute_ms, timings.last_render_ms, cpu, ram, entities
             );
         } else {
             node.display = Display::None;

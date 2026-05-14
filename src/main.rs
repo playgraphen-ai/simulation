@@ -135,6 +135,9 @@ fn start_timing(mut timings: ResMut<DetailedTimings>) {
     let now = Instant::now();
     timings.frame_start = Some(now);
     timings.update_start = Some(now);
+    // Reset frame-local timings
+    timings.last_compute_ms = 0.0;
+    timings.last_render_ms = 0.0;
 }
 
 fn receive_timings(
@@ -147,12 +150,11 @@ fn receive_timings(
                 timings.last_compute_ms += compute;
             }
             if render > 0.0 {
-                timings.last_render_ms = (render - timings.last_compute_ms).max(0.0);
+                timings.last_render_ms += render;
             }
         }
         timings.acc_compute_ms += timings.last_compute_ms;
         timings.acc_render_ms += timings.last_render_ms;
-        timings.last_compute_ms = 0.0;
     }
 }
 
