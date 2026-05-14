@@ -41,20 +41,30 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
 
     let pid = u32(vertex.car_id);
-    
+
     // Read from transforms_tex
     let t_w = 1024u;
     let t_idx = pid * 2u;
-    
+
     let tx0 = t_idx % t_w;
     let ty0 = t_idx / t_w;
     let pos_col = textureLoad(transforms_tex, vec2<i32>(i32(tx0), i32(ty0)), 0);
-    
+    let world_pos = pos_col.xyz;
+
+    // EARLY DISCARD
+    if world_pos.y < -1000.0 {
+        out.clip_position = vec4<f32>(2.0, 2.0, 2.0, 1.0); // Outside NDC
+        out.world_position = vec4<f32>(0.0);
+        out.world_normal = vec3<f32>(0.0, 1.0, 0.0);
+        out.uv = vec2<f32>(0.0);
+        out.color = vec3<f32>(0.0);
+        return out;
+    }
+
     let tx1 = (t_idx + 1u) % t_w;
     let ty1 = (t_idx + 1u) / t_w;
     let rot_col = textureLoad(transforms_tex, vec2<i32>(i32(tx1), i32(ty1)), 0);
-    
-    let world_pos = pos_col.xyz;
+
     let is_white = pos_col.w;
 
     let d_x = rot_col.x;
@@ -87,7 +97,6 @@ fn vertex(vertex: Vertex) -> VertexOutput {
 
     return out;
 }
-
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let light_dir = normalize(vec3<f32>(0.5, 1.0, 0.3));
