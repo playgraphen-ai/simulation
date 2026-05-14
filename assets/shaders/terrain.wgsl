@@ -134,6 +134,20 @@ fn fragment(
         }
 
         final_color = road_color;
+    } else {
+        // Rendu des zones
+        let zone_id = i32(splat.b * 255.0 + 0.5);
+        if (zone_id > 0) {
+            var zone_color = final_color;
+            if (zone_id == 1) { // Residential
+                zone_color = mix(final_color, vec3<f32>(0.2, 0.7, 0.25), 0.4);
+            } else if (zone_id == 2) { // Office
+                zone_color = mix(final_color, vec3<f32>(0.25, 0.45, 0.85), 0.4);
+            } else if (zone_id == 3) { // Shop
+                zone_color = mix(final_color, vec3<f32>(0.9, 0.65, 0.2), 0.4);
+            }
+            final_color = zone_color;
+        }
     }
 
     // Output final

@@ -17,7 +17,7 @@ impl Plugin for WorldRenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WorldVisuals>()
             .add_systems(Startup, (setup_ground.after(crate::sim::startup), build_palette))
-            .add_systems(Update, (sync_zone_view, sync_road_view, sync_building_view, sync_splat_map_system));
+            .add_systems(Update, (sync_road_view, sync_building_view, sync_splat_map_system));
     }
 }
 
@@ -25,20 +25,15 @@ impl Plugin for WorldRenderPlugin {
 pub struct WorldVisuals {
     pub tile_mesh: Handle<Mesh>,
     pub road_mesh: Handle<Mesh>,
-    pub mat_zone_res: Handle<StandardMaterial>,
-    pub mat_zone_off: Handle<StandardMaterial>,
-    pub mat_zone_shop: Handle<StandardMaterial>,
     pub mat_road: Handle<StandardMaterial>,
-    /// Per (btype, level) GLTF scene handle.
+    pub mat_buildings: Handle<StandardMaterial>,
+    /// Per (btype, level) Scene handle.
     pub residential_scenes: Vec<Handle<Scene>>, // 5
     pub office_scenes: Vec<Handle<Scene>>,      // 5
     pub shop_scenes: Vec<Handle<Scene>>,        // 5
     pub road_scene: Handle<Scene>,
     pub car_scene: Handle<Scene>,
 }
-
-#[derive(Component)]
-struct ZoneMarker;
 
 #[derive(Component)]
 struct RoadMarker;
@@ -90,7 +85,6 @@ fn setup_ground(
         for x in 0..w {
             let i = grid.idx(x, y);
             let elev = grid.elevations[i];
-            // Remove the 0.5 offset to align vertices with grid corners
             positions.push([x as f32, elev, y as f32]);
             
             // Encode biomes as splat weights: Water(R), Plains(G), Forest(B), Desert(A)
@@ -141,6 +135,7 @@ fn setup_ground(
         Mesh3d(meshes.add(mesh)),
         MeshMaterial3d(mat),
         Transform::default(),
+        Visibility::default(),
     ));
 }
 
@@ -152,14 +147,19 @@ fn build_palette(
 ) {
     vis.tile_mesh = meshes.add(Plane3d::default().mesh().size(0.96, 0.96));
     vis.road_mesh = meshes.add(Plane3d::default().mesh().size(0.96, 0.96));
-    vis.mat_zone_res = materials.add(tint(0.2, 0.7, 0.25, 0.4));
-    vis.mat_zone_off = materials.add(tint(0.25, 0.45, 0.85, 0.4));
-    vis.mat_zone_shop = materials.add(tint(0.9, 0.65, 0.2, 0.4));
     vis.mat_road = materials.add(StandardMaterial {
         base_color: Color::srgb(0.15, 0.15, 0.18),
         perceptual_roughness: 0.9,
         ..default()
     });
+    
+    let b_tex = asset_server.load("models/buildings/Textures/colormap.png");
+    vis.mat_buildings = materials.add(StandardMaterial {
+        base_color_texture: Some(b_tex),
+        perceptual_roughness: 0.8,
+        ..default()
+    });
+
     vis.residential_scenes = (0..=MAX_LEVEL)
         .map(|lvl| asset_server.load(GltfAssetLabel::Scene(0)
             .from_asset(format!("models/buildings/residential_{}.glb", lvl))))
@@ -172,49 +172,11 @@ fn build_palette(
         .map(|lvl| asset_server.load(GltfAssetLabel::Scene(0)
             .from_asset(format!("models/buildings/shop_{}.glb", lvl))))
         .collect();
+    
     vis.road_scene = asset_server.load(
         GltfAssetLabel::Scene(0).from_asset("models/roads/road_straight.glb"));
     vis.car_scene = asset_server.load(
         GltfAssetLabel::Scene(0).from_asset("models/vehicles/sedan.glb"));
-}
-
-fn tint(r: f32, g: f32, b: f32, a: f32) -> StandardMaterial {
-    StandardMaterial {
-        base_color: Color::srgba(r, g, b, a),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default()
-    }
-}
-
-fn sync_zone_view(
-    mut commands: Commands,
-    grid: Res<CityGrid>,
-    vis: Res<WorldVisuals>,
-    existing: Query<Entity, With<ZoneMarker>>,
-) {
-    if !grid.is_changed() { return; }
-    for e in &existing {
-        commands.entity(e).despawn();
-    }
-    for y in 0..grid.height {
-        for x in 0..grid.width {
-            if let Some(Tile::Zone(z)) = grid.get(x, y) {
-                let mat = match z {
-                    ZoneType::Residential => vis.mat_zone_res.clone(),
-                    ZoneType::Office => vis.mat_zone_off.clone(),
-                    ZoneType::Shop => vis.mat_zone_shop.clone(),
-                };
-                let elev = grid.elevations[grid.idx(x, y)];
-                commands.spawn((
-                    Mesh3d(vis.tile_mesh.clone()),
-                    MeshMaterial3d(mat),
-                    Transform::from_xyz(x as f32 + 0.5, elev + 0.02, y as f32 + 0.5),
-                    ZoneMarker,
-                ));
-            }
-        }
-    }
 }
 
 fn sync_road_view(
@@ -272,6 +234,7 @@ fn sync_building_view(
             Transform::from_xyz(b.tile.0 as f32 + offset, elev, b.tile.1 as f32 + offset)
                 .with_scale(Vec3::splat(size)),
             BuildingMarker(id_u32, b.level),
+            Visibility::default(),
         ));
     }
 }
@@ -291,51 +254,61 @@ fn sync_splat_map_system(
     splat_map_res: Option<Res<TerrainSplatMap>>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    if !grid.is_changed() { return; }
+    if !grid.is_changed() && !roads.is_changed() { return; }
     if let Some(res) = splat_map_res {
         if let Some(img) = images.get_mut(&res.0) {
             let mut data = vec![0u8; (grid.width * grid.height * 4) as usize];
             for y in 0..grid.height {
                 for x in 0..grid.width {
-                    if let Some(Tile::Road(seg_id)) = grid.get(x, y) {
-                        let seg = &roads.segments[seg_id as usize];
-                        let rtype = seg.road_type;
-                        
-                        // Determine actual direction from segment endpoints
-                        let dx = (seg.b.0 as i32 - seg.a.0 as i32).abs();
-                        let dy = (seg.b.1 as i32 - seg.a.1 as i32).abs();
-                        let is_v = dy > dx;
-                        
-                        // Detect if tile is near the segment ends (junctions)
-                        let radius = match rtype {
-                            crate::sim::roads::RoadType::Highway2x4 => 3,
-                            crate::sim::roads::RoadType::Highway => 2,
-                            crate::sim::roads::RoadType::Normal => 1,
-                        };
-                        
-                        let dist_a = (x as i32 - seg.a.0 as i32).abs().max((y as i32 - seg.a.1 as i32).abs());
-                        let dist_b = (x as i32 - seg.b.0 as i32).abs().max((y as i32 - seg.b.1 as i32).abs());
-                        let is_i = dist_a <= radius || dist_b <= radius;
+                    let tile = grid.get(x, y);
+                    let idx = (y * grid.width + x) as usize * 4;
+                    
+                    match tile {
+                        Some(Tile::Road(seg_id)) => {
+                            if (seg_id as usize) < roads.segments.len() {
+                                let seg = &roads.segments[seg_id as usize];
+                                let rtype = seg.road_type;
+                                
+                                let dx = (seg.b.0 as i32 - seg.a.0 as i32).abs();
+                                let dy = (seg.b.1 as i32 - seg.a.1 as i32).abs();
+                                let is_v = dy > dx;
+                                
+                                let radius = match rtype {
+                                    crate::sim::roads::RoadType::Highway2x4 => 3,
+                                    crate::sim::roads::RoadType::Highway => 2,
+                                    crate::sim::roads::RoadType::Normal => 1,
+                                };
+                                
+                                let dist_a = (x as i32 - seg.a.0 as i32).abs().max((y as i32 - seg.a.1 as i32).abs());
+                                let dist_b = (x as i32 - seg.b.0 as i32).abs().max((y as i32 - seg.b.1 as i32).abs());
+                                let is_i = dist_a <= radius || dist_b <= radius;
 
-                        let variant = if is_i {
-                            2 // Intersection
-                        } else if is_v {
-                            1 // Vertical
-                        } else {
-                            0 // Horizontal
-                        };
-
-                        let base = match rtype {
-                            crate::sim::roads::RoadType::Normal => 1,
-                            crate::sim::roads::RoadType::Highway => 4,
-                            crate::sim::roads::RoadType::Highway2x4 => 7,
-                        };
-                        
-                        let idx = (y * grid.width + x) as usize * 4;
-                        data[idx] = base + variant; // R: Type and Direction
-                        data[idx + 1] = if is_v { (seg.a.0 % 256) as u8 } else { (seg.a.1 % 256) as u8 }; // G: Center axis anchor
-                        data[idx + 2] = 0; // B
-                        data[idx + 3] = 255; // A
+                                let variant = if is_i { 2 } else if is_v { 1 } else { 0 };
+                                let base = match rtype {
+                                    crate::sim::roads::RoadType::Normal => 1,
+                                    crate::sim::roads::RoadType::Highway => 4,
+                                    crate::sim::roads::RoadType::Highway2x4 => 7,
+                                };
+                                
+                                data[idx] = base + variant;
+                                data[idx + 1] = if is_v { (seg.a.0 % 256) as u8 } else { (seg.a.1 % 256) as u8 };
+                                data[idx + 2] = 0;
+                                data[idx + 3] = 255;
+                            }
+                        }
+                        Some(Tile::Zone(z)) => {
+                            data[idx] = 0;
+                            data[idx + 1] = 0;
+                            data[idx + 2] = match z {
+                                ZoneType::Residential => 1,
+                                ZoneType::Office => 2,
+                                ZoneType::Shop => 3,
+                            };
+                            data[idx + 3] = 255;
+                        }
+                        _ => {
+                            data[idx + 3] = 0;
+                        }
                     }
                 }
             }
