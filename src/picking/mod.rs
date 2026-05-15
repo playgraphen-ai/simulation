@@ -263,6 +263,10 @@ impl bevy::render::render_graph::Node for GpuPickingNode {
         let pipeline_id = world.resource::<GpuPickingPipeline>().pipeline;
         let buffers = world.resource::<GpuPickingBuffers>();
 
+        if buffers.readback_mapped.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
         if let (Some(pipeline), Some(bg), Some(result), Some(readback)) = (
             pipeline_cache.get_compute_pipeline(pipeline_id),
             buffers.bind_group.as_ref(),
