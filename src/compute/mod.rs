@@ -42,6 +42,7 @@ pub struct SimScheduleState {
     pub config: ScheduleConfig,
     pub current_frame: u32,
     pub cycle_frames: u32,
+    pub recount_frame: u32,
 }
 
 impl Default for SimScheduleState {
@@ -51,7 +52,7 @@ impl Default for SimScheduleState {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         let cycle_frames = config.gc_frames + config.buildings_frames + config.people_logic_frames + config.roads_frames + config.pathfind_frames + config.stats_frames;
-        Self { config, current_frame: 0, cycle_frames }
+        Self { config, current_frame: 0, cycle_frames, recount_frame: 0 }
     }
 }
 
@@ -151,6 +152,7 @@ fn queue_texture_updates_system(
 
 fn update_schedule_state(mut state: ResMut<SimScheduleState>) {
     state.current_frame = (state.current_frame + 1) % state.cycle_frames;
+    state.recount_frame = state.recount_frame.wrapping_add(1);
 }
 
 fn setup_data_textures(
@@ -238,7 +240,9 @@ fn sync_gpu_textures_and_params(
     gpu_params.b_count = 0;
     gpu_params.logic_count = 0;
     gpu_params.r_count = 0;
-    gpu_params.recount_slice = schedule.current_frame % 5;
+    
+    // Hardcode GPU recount to 5 slices to avoid zeroing out occupancy arrays for too long
+    gpu_params.recount_slice = schedule.recount_frame % 5;
     gpu_params.recount_slice_count = 5;
 
     let c = &schedule.config;
@@ -281,15 +285,15 @@ fn sync_gpu_textures_and_params(
         }
     }
 
-    // Reset stats only at the beginning of the recount cycle
+    // Reset stats only at the beginning of the 5-frame recount cycle
     if gpu_params.recount_slice == 0 {
         gpu_params.reset_stats = 1;
     } else {
         gpu_params.reset_stats = 0;
     }
 
-    // Readback only at the end of the recount cycle
-    if gpu_params.recount_slice == 4 {
+    // Readback only at the end of the recount cycle, AND only once every ~60 frames to save performance
+    if gpu_params.recount_slice == 4 && (schedule.recount_frame % 60) == 4 {
         gpu_params.do_stats_readback = 1;
     } else {
         gpu_params.do_stats_readback = 0;
