@@ -350,6 +350,8 @@ impl bevy::render::render_graph::Node for GpuPathfindingNode {
         if let Ok(tx) = world.resource::<crate::TimingsSender>().0.lock() {
             let mut event = crate::TimingEvent::default();
             event.pathfind = start.elapsed().as_secs_f32() * 1000.0;
+            // 2048 workgroups * 64 threads = 131072 pathfinding threads per dispatch
+            event.path_count = Some(131072);
             let _ = tx.send(event);
         }
 

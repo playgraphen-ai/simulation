@@ -28,6 +28,25 @@ pub struct TimingEvent {
     pub road: f32,
     pub pathfind: f32,
     pub render: f32,
+    
+    // Cycle info
+    pub logic_cycle: Option<(u32, u32)>,
+    pub bldg_cycle: Option<(u32, u32)>,
+    pub road_cycle: Option<(u32, u32)>,
+    
+    // Readback latencies
+    pub rb_stats_ms: Option<f32>,
+    pub rb_person_ms: Option<f32>,
+    pub rb_bldg_ms: Option<f32>,
+
+    // Counts for throughput
+    pub logic_count: Option<u32>,
+    pub path_count: Option<u32>,
+
+    // Occupancy capacities and counts
+    pub occ_people: Option<(u32, u32)>,
+    pub occ_bldgs: Option<(u32, u32)>,
+    pub occ_segments: Option<(u32, u32)>,
 }
 
 #[derive(Resource)]
@@ -59,6 +78,30 @@ pub struct DetailedTimings {
     pub smooth_bldg_ms: f32,
     pub smooth_road_ms: f32,
     pub smooth_pathfind_ms: f32,
+
+    pub peak_logic_ms: f32,
+    pub peak_bldg_ms: f32,
+    pub peak_road_ms: f32,
+    pub peak_pathfind_ms: f32,
+    
+    // Cycle progress
+    pub logic_cycle: (u32, u32),
+    pub bldg_cycle: (u32, u32),
+    pub road_cycle: (u32, u32),
+
+    // Data Readback latencies
+    pub rb_stats_ms: f32,
+    pub rb_person_ms: f32,
+    pub rb_bldg_ms: f32,
+
+    // Throughput (items / ms)
+    pub throughput_logic: f32,
+    pub throughput_path: f32,
+
+    // Buffer Occupancy %
+    pub occ_people: f32,
+    pub occ_buildings: f32,
+    pub occ_segments: f32,
 
     pub acc_update_ms: f32,
     pub acc_compute_ms: f32,
@@ -184,6 +227,39 @@ fn receive_timings(
             if event.road > 0.0 { timings.last_road_ms += event.road; }
             if event.pathfind > 0.0 { timings.last_pathfind_ms += event.pathfind; }
             if event.render > 0.0 { timings.last_render_ms += event.render; }
+
+            if let Some(cycle) = event.logic_cycle { timings.logic_cycle = cycle; }
+            if let Some(cycle) = event.bldg_cycle { timings.bldg_cycle = cycle; }
+            if let Some(cycle) = event.road_cycle { timings.road_cycle = cycle; }
+
+            if let Some(ms) = event.rb_stats_ms { timings.rb_stats_ms = ms; }
+            if let Some(ms) = event.rb_person_ms { timings.rb_person_ms = ms; }
+            if let Some(ms) = event.rb_bldg_ms { timings.rb_bldg_ms = ms; }
+
+            if let Some(count) = event.logic_count { 
+                if event.logic > 0.0 {
+                    let alpha = 0.1;
+                    let throughput = count as f32 / event.logic;
+                    timings.throughput_logic = timings.throughput_logic * (1.0 - alpha) + throughput * alpha;
+                }
+            }
+            if let Some(count) = event.path_count {
+                if event.pathfind > 0.0 {
+                    let alpha = 0.1;
+                    let throughput = count as f32 / event.pathfind;
+                    timings.throughput_path = timings.throughput_path * (1.0 - alpha) + throughput * alpha;
+                }
+            }
+
+            if let Some((occ, cap)) = event.occ_people {
+                if cap > 0 { timings.occ_people = (occ as f32 / cap as f32) * 100.0; }
+            }
+            if let Some((occ, cap)) = event.occ_bldgs {
+                if cap > 0 { timings.occ_buildings = (occ as f32 / cap as f32) * 100.0; }
+            }
+            if let Some((occ, cap)) = event.occ_segments {
+                if cap > 0 { timings.occ_segments = (occ as f32 / cap as f32) * 100.0; }
+            }
         }
         
         // Apply smoothing (EWMA)
@@ -195,15 +271,27 @@ fn receive_timings(
         }
         if timings.last_logic_ms > 0.0 {
             timings.smooth_logic_ms = timings.smooth_logic_ms * (1.0 - alpha) + timings.last_logic_ms * alpha;
+            if timings.last_logic_ms > timings.peak_logic_ms {
+                timings.peak_logic_ms = timings.last_logic_ms;
+            }
         }
         if timings.last_bldg_ms > 0.0 {
             timings.smooth_bldg_ms = timings.smooth_bldg_ms * (1.0 - alpha) + timings.last_bldg_ms * alpha;
+            if timings.last_bldg_ms > timings.peak_bldg_ms {
+                timings.peak_bldg_ms = timings.last_bldg_ms;
+            }
         }
         if timings.last_road_ms > 0.0 {
             timings.smooth_road_ms = timings.smooth_road_ms * (1.0 - alpha) + timings.last_road_ms * alpha;
+            if timings.last_road_ms > timings.peak_road_ms {
+                timings.peak_road_ms = timings.last_road_ms;
+            }
         }
         if timings.last_pathfind_ms > 0.0 {
             timings.smooth_pathfind_ms = timings.smooth_pathfind_ms * (1.0 - alpha) + timings.last_pathfind_ms * alpha;
+            if timings.last_pathfind_ms > timings.peak_pathfind_ms {
+                timings.peak_pathfind_ms = timings.last_pathfind_ms;
+            }
         }
         
         timings.smooth_render_ms = timings.smooth_render_ms * (1.0 - alpha) + timings.last_render_ms * alpha;

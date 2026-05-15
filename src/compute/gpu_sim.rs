@@ -985,6 +985,8 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(logic_wg_count, 1, 1);
                 drop(pass);
                 event.logic = logic_start_time.elapsed().as_secs_f32() * 1000.0;
+                event.logic_count = Some(params.logic_count);
+                event.logic_cycle = Some((params.logic_start / params.logic_count.max(1) + 1, (params.people_count + params.logic_count.max(1) - 1) / params.logic_count.max(1)));
             }
 
             // 5. Buildings pass (Updates textures from Recount results)
@@ -1000,6 +1002,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(b_wg_count, 1, 1);
                 drop(pass);
                 event.bldg = bldg_start_time.elapsed().as_secs_f32() * 1000.0;
+                event.bldg_cycle = Some((params.b_start / params.b_count.max(1) + 1, (params.buildings_count + params.b_count.max(1) - 1) / params.b_count.max(1)));
             }
 
             // 6. Update Roads pass
@@ -1015,6 +1018,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(r_wg_count, 1, 1);
                 drop(pass);
                 event.road = road_start_time.elapsed().as_secs_f32() * 1000.0;
+                event.road_cycle = Some((params.r_start / params.r_count.max(1) + 1, (params.segments_count + params.r_count.max(1) - 1) / params.r_count.max(1)));
             }
         }
 
@@ -1093,6 +1097,12 @@ impl bevy::render::render_graph::Node for GpuSimNode {
 
         if let Ok(tx) = world.resource::<crate::TimingsSender>().0.lock() {
             event.total_compute = start.elapsed().as_secs_f32() * 1000.0;
+            
+            // Collect occupancy data
+            event.occ_people = Some((params.people_count, 524288)); // HARDCODED from MAX_PEOPLE
+            event.occ_bldgs = Some((params.buildings_count, crate::sim::buildings::BUILDING_CAPACITY as u32));
+            event.occ_segments = Some((params.segments_count, 65536)); // HARDCODED max segments
+
             let _ = tx.send(event);
         }
 
@@ -1106,6 +1116,7 @@ fn map_and_send_readback(
     sender_p: Res<PeopleSender>,
     sender_b: Res<BuildingsSender>,
     sender_s: Res<StatsSender>,
+    timings_sender: Res<crate::TimingsSender>,
     params: Res<GpuSimParams>,
     selection: Option<Res<crate::ui::inspector::Selection>>,
 ) {
@@ -1114,8 +1125,10 @@ fn map_and_send_readback(
         if let Some(s_buf) = readback.stats_buffer.as_ref() {
             readback.s_mapped.store(true, Ordering::Relaxed);
             let tx_s = sender_s.0.lock().unwrap().clone();
+            let tx_t = timings_sender.0.lock().unwrap().clone();
             let s_clone = s_buf.clone();
             let s_mapped_flag = readback.s_mapped.clone();
+            let start = std::time::Instant::now();
             s_buf.slice(..).map_async(MapMode::Read, move |res| {
                 if res.is_ok() {
                     let data = s_clone.slice(..).get_mapped_range();
@@ -1123,6 +1136,11 @@ fn map_and_send_readback(
                     drop(data);
                     s_clone.unmap();
                     let _ = tx_s.send(stats);
+                    
+                    // Send timing
+                    let mut event = crate::TimingEvent::default();
+                    event.rb_stats_ms = Some(start.elapsed().as_secs_f32() * 1000.0);
+                    let _ = tx_t.send(event);
                 }
                 s_mapped_flag.store(false, Ordering::Relaxed);
             });
@@ -1138,8 +1156,10 @@ fn map_and_send_readback(
                     if let Some(p_buf) = readback.inspector_p_buf.as_ref() {
                         readback.p_mapped.store(true, Ordering::Relaxed);
                         let tx_p = sender_p.0.lock().unwrap().clone();
+                        let tx_t = timings_sender.0.lock().unwrap().clone();
                         let p_clone = p_buf.clone();
                         let p_mapped_flag = readback.p_mapped.clone();
+                        let start = std::time::Instant::now();
                         p_buf.slice(..).map_async(MapMode::Read, move |res_p| {
                             if res_p.is_ok() {
                                 let data_p = p_clone.slice(..).get_mapped_range();
@@ -1148,6 +1168,10 @@ fn map_and_send_readback(
                                     drop(data_p);
                                     p_clone.unmap();
                                     let _ = tx_p.send(vec![(pid, row)]);
+                                    
+                                    let mut event = crate::TimingEvent::default();
+                                    event.rb_person_ms = Some(start.elapsed().as_secs_f32() * 1000.0);
+                                    let _ = tx_t.send(event);
                                 } else {
                                     drop(data_p);
                                     p_clone.unmap();
@@ -1166,8 +1190,10 @@ fn map_and_send_readback(
                     if let Some(b_buf) = readback.inspector_b_buf.as_ref() {
                         readback.b_mapped.store(true, Ordering::Relaxed);
                         let tx_b = sender_b.0.lock().unwrap().clone();
+                        let tx_t = timings_sender.0.lock().unwrap().clone();
                         let b_clone = b_buf.clone();
                         let b_mapped_flag = readback.b_mapped.clone();
+                        let start = std::time::Instant::now();
                         b_buf.slice(..).map_async(MapMode::Read, move |res_b| {
                             if res_b.is_ok() {
                                 let data_b = b_clone.slice(..).get_mapped_range();
@@ -1176,6 +1202,10 @@ fn map_and_send_readback(
                                     drop(data_b);
                                     b_clone.unmap();
                                     let _ = tx_b.send(vec![(bid, row)]);
+                                    
+                                    let mut event = crate::TimingEvent::default();
+                                    event.rb_bldg_ms = Some(start.elapsed().as_secs_f32() * 1000.0);
+                                    let _ = tx_t.send(event);
                                 } else {
                                     drop(data_b);
                                     b_clone.unmap();
