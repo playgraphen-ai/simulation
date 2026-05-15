@@ -2,12 +2,14 @@ mod sim;
 mod render;
 mod ui;
 mod compute;
+mod picking;
 mod log_export;
 
 use bevy::prelude::*;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use bevy::render::render_resource::WgpuFeatures;
-use bevy::render::RenderPlugin as BevyRenderPlugin;
+use bevy::render::RenderPlugin;
+
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin, EntityCountDiagnosticsPlugin};
 use std::time::Instant;
 use std::sync::Mutex;
@@ -149,7 +151,7 @@ fn main() {
                 }),
                 ..default()
             })
-            .set(BevyRenderPlugin {
+            .set(RenderPlugin {
                 render_creation: RenderCreation::Automatic(WgpuSettings {
                     backends: Some(backends),
                     disabled_features: Some(disabled),
@@ -172,6 +174,7 @@ fn main() {
             render::WorldPlugin,
             ui::UiPlugin,
             compute::ComputePlugin,
+            picking::GpuPickingPlugin,
             log_export::LogPlugin,
         ))
         .add_systems(First, start_timing)

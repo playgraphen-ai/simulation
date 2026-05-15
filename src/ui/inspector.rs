@@ -4,7 +4,7 @@ use bevy::render::extract_resource::ExtractResource;
 
 use crate::sim::buildings::BuildingData;
 use crate::sim::grid::{CityGrid, Tile, ZoneType};
-use crate::sim::people::{Activity, PeopleData};
+use crate::sim::people::PeopleData;
 use crate::sim::roads::RoadData;
 use crate::ui::tools::ActiveTool;
 use crate::render::camera::CursorTile;
@@ -131,13 +131,14 @@ pub fn handle_selection(
     mouse: Res<ButtonInput<MouseButton>>,
     active: Res<ActiveTool>,
     cursor: Res<CursorTile>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    camera_q: Query<(&Camera, &GlobalTransform)>,
+    _windows: Query<&Window, With<PrimaryWindow>>,
+    _camera_q: Query<(&Camera, &GlobalTransform)>,
     grid: Res<CityGrid>,
-    people: Res<PeopleData>,
-    roads: Res<RoadData>,
+    _people: Res<PeopleData>,
+    _roads: Res<RoadData>,
     mut selection: ResMut<Selection>,
     interaction_q: Query<&Interaction, With<Button>>,
+    picked_car: Res<crate::picking::PickedCar>,
 ) {
     if !mouse.just_pressed(MouseButton::Left) { return; }
     if !matches!(*active, ActiveTool::None) { return; }
@@ -148,38 +149,8 @@ pub fn handle_selection(
         }
     }
 
-    // 1. Try to select a car via raycast
-    let mut closest_car = None;
-    let mut min_dist = 4.0; // Click radius for cars (increased for easier clicking)
-
-    if let Ok(window) = windows.single() {
-        if let Some(pos) = window.cursor_position() {
-            if let Ok((camera, cam_tf)) = camera_q.single() {
-                if let Ok(ray) = camera.viewport_to_world(cam_tf, pos) {
-                    let dir: Vec3 = ray.direction.into();
-                    for id in 0..people.len {
-                        let row = &people.rows[id as usize];
-                        if row.activity_code as u32 == Activity::Travelling as u32 && row.current_seg != 0xFFFFFFFFu32 as f32 {
-                            let seg_id = row.current_seg as u32;
-                            if let Some(seg) = roads.segments.get(seg_id as usize) {
-                                let cx = (seg.a.0 + seg.b.0) as f32 * 0.5 + 0.5;
-                                let cz = (seg.a.1 + seg.b.1) as f32 * 0.5 + 0.5;
-                                let c_pos = Vec3::new(cx, 0.0, cz);
-                                
-                                let dist = (c_pos - ray.origin).cross(dir).length();
-                                if dist < min_dist {
-                                    min_dist = dist;
-                                    closest_car = Some(id);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(car_id) = closest_car {
+    // 1. Try to select a car via GPU picking result
+    if let Some(car_id) = picked_car.0 {
         selection.obj = Some(SelectedObj::Person(car_id));
         selection.changed_frame += 1;
         return;
