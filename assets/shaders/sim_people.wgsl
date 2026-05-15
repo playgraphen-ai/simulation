@@ -820,7 +820,7 @@ fn main_buildings(@builtin(global_invocation_id) gid: vec3<u32>) {
         if growth >= 1.0 {
             level = level + 1.0;
             growth = 0.0;
-            let base_cap = select(select(4.0, 6.0, btype == 1.0), 8.0, btype == 2.0);
+            let base_cap = select(select(8.0, 12.0, btype == 1.0), 16.0, btype == 2.0);
             capacity = base_cap * exp2(level);
             // We no longer overwrite tex1.x with a fixed base_inc.
             // tex1.x = base_inc * (level + 1.0);

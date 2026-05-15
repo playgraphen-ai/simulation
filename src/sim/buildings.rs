@@ -120,9 +120,9 @@ impl BuildingData {
 /// Capacity by level: each upgrade roughly doubles capacity.
 fn capacity_for(btype: ZoneType, level: u32) -> u32 {
     let base = match btype {
-        ZoneType::Residential => 36, // 9x for 3x3
-        ZoneType::Office => 96,  // 16x for 4x4
-        ZoneType::Shop => 128,   // 16x for 4x4
+        ZoneType::Residential => 72, // 9x for 3x3
+        ZoneType::Office => 192,  // 16x for 4x4
+        ZoneType::Shop => 256,   // 16x for 4x4
     };
     base * (1 << level)
 }
