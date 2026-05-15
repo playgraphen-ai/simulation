@@ -17,26 +17,19 @@ impl Plugin for WorldRenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WorldVisuals>()
             .add_systems(Startup, (setup_ground.after(crate::sim::startup), build_palette))
-            .add_systems(Update, (sync_road_view, sync_building_view, sync_splat_map_system));
+            .add_systems(Update, (sync_building_view, sync_splat_map_system));
     }
 }
 
 #[derive(Resource, Default)]
 pub struct WorldVisuals {
-    pub tile_mesh: Handle<Mesh>,
-    pub road_mesh: Handle<Mesh>,
-    pub mat_road: Handle<StandardMaterial>,
     pub mat_buildings: Handle<StandardMaterial>,
     /// Per (btype, level) Mesh handle.
     pub residential_meshes: Vec<Handle<Mesh>>, // 5
     pub office_meshes: Vec<Handle<Mesh>>,      // 5
     pub shop_meshes: Vec<Handle<Mesh>>,        // 5
-    pub road_scene: Handle<Scene>,
     pub car_scene: Handle<Scene>,
 }
-
-#[derive(Component)]
-struct RoadMarker;
 
 #[derive(Component)]
 pub struct BuildingMarker(pub u32, pub u32); // (id, level)
@@ -141,18 +134,9 @@ fn setup_ground(
 
 fn build_palette(
     asset_server: Res<AssetServer>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut vis: ResMut<WorldVisuals>,
 ) {
-    vis.tile_mesh = meshes.add(Plane3d::default().mesh().size(0.96, 0.96));
-    vis.road_mesh = meshes.add(Plane3d::default().mesh().size(0.96, 0.96));
-    vis.mat_road = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.15, 0.15, 0.18),
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-    
     let b_tex = asset_server.load("models/buildings/Textures/colormap.png");
     vis.mat_buildings = materials.add(StandardMaterial {
         base_color_texture: Some(b_tex),
@@ -173,24 +157,8 @@ fn build_palette(
             .from_asset(format!("models/buildings/shop_{}.glb", lvl))))
         .collect();
     
-    vis.road_scene = asset_server.load(
-        GltfAssetLabel::Scene(0).from_asset("models/roads/road_straight.glb"));
     vis.car_scene = asset_server.load(
         GltfAssetLabel::Scene(0).from_asset("models/vehicles/sedan.glb"));
-}
-
-fn sync_road_view(
-    mut commands: Commands,
-    roads: Res<RoadData>,
-    existing: Query<Entity, With<RoadMarker>>,
-) {
-    if !roads.is_changed() { return; }
-    // We no longer spawn GLTF meshes for roads, because we render them directly
-    // on the terrain using the splat map. So we just ensure any legacy road 
-    // marker entities are despawned.
-    for e in &existing {
-        commands.entity(e).despawn();
-    }
 }
 
 fn sync_building_view(
