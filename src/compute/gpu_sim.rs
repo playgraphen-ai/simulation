@@ -932,6 +932,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
 
             if params.people_count > 0 {
                 pass.dispatch_workgroups(recount_wg_count, 1, 1);
+                event.recount_cycle = Some((params.recount_slice + 1, slice_count));
             }
             drop(pass);
 

@@ -30,6 +30,7 @@ pub struct TimingEvent {
     pub render: f32,
     
     // Cycle info
+    pub recount_cycle: Option<(u32, u32)>,
     pub logic_cycle: Option<(u32, u32)>,
     pub bldg_cycle: Option<(u32, u32)>,
     pub road_cycle: Option<(u32, u32)>,
@@ -85,6 +86,7 @@ pub struct DetailedTimings {
     pub peak_pathfind_ms: f32,
     
     // Cycle progress
+    pub recount_cycle: Option<(u32, u32)>,
     pub logic_cycle: (u32, u32),
     pub bldg_cycle: (u32, u32),
     pub road_cycle: (u32, u32),
@@ -228,6 +230,7 @@ fn receive_timings(
             if event.pathfind > 0.0 { timings.last_pathfind_ms += event.pathfind; }
             if event.render > 0.0 { timings.last_render_ms += event.render; }
 
+            if let Some(cycle) = event.recount_cycle { timings.recount_cycle = Some(cycle); }
             if let Some(cycle) = event.logic_cycle { timings.logic_cycle = cycle; }
             if let Some(cycle) = event.bldg_cycle { timings.bldg_cycle = cycle; }
             if let Some(cycle) = event.road_cycle { timings.road_cycle = cycle; }
