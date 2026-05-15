@@ -146,6 +146,7 @@ pub struct GpuStats {
     pub residential_assigned: u32,
     pub office_assigned: u32,
     pub bankrupt_count: u32,
+    pub active_car_count: u32, // New field, cleared every frame
     pub tax_income_total: u32,
     pub tax_rent_total: u32,
     pub tax_consumption_total: u32,
@@ -341,6 +342,7 @@ pub struct GpuSimParams {
     pub recount_slice_count: u32,
     pub do_occupancy_gc: u32,
     pub do_inspector_readback: u32,
+    pub car_capacity: u32,
 }
 
 impl Default for GpuSimParams {
@@ -386,6 +388,7 @@ impl Default for GpuSimParams {
             recount_slice_count: 5,
             do_occupancy_gc: 0,
             do_inspector_readback: 0,
+            car_capacity: 0,
         }
     }
 }
@@ -403,6 +406,7 @@ struct GpuSimPipeline {
     pub update_roads_pipeline: CachedComputePipelineId,
     pub spawn_pipeline: CachedComputePipelineId,
     pub car_transform_pipeline: CachedComputePipelineId,
+    pub car_clear_pipeline: CachedComputePipelineId,
     pub bind_group_layout: BindGroupLayout,
 }
 
@@ -669,9 +673,19 @@ impl FromWorld for GpuSimPipeline {
             label: Some(Cow::Borrowed("gpu_sim_car_transform_pipeline")),
             layout: vec![layout_desc.clone()], 
             push_constant_ranges: vec![],
-            shader: car_transform_shader,
+            shader: car_transform_shader.clone(),
             shader_defs: vec![],
             entry_point: Some(Cow::Borrowed("main")),
+            zero_initialize_workgroup_memory: false,
+        });
+
+        let car_clear_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+            label: Some(Cow::Borrowed("gpu_sim_car_clear_pipeline")),
+            layout: vec![layout_desc.clone()], 
+            push_constant_ranges: vec![],
+            shader: car_transform_shader,
+            shader_defs: vec![],
+            entry_point: Some(Cow::Borrowed("main_clear")),
             zero_initialize_workgroup_memory: false,
         });
 
@@ -687,6 +701,7 @@ impl FromWorld for GpuSimPipeline {
             logic_pipeline,
             spawn_pipeline,
             car_transform_pipeline,
+            car_clear_pipeline,
             bind_group_layout: layout,
         }
     }
@@ -892,6 +907,11 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             }
 
             // --- CLEAR PASS ---
+            // Clear active_car_count every frame. Offset 60, size 4.
+            if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
+                render_context.command_encoder().clear_buffer(stats_buf, 60, Some(4));
+            }
+
             // Clear recount stats before any logic logic
             // Only clear the first 60 bytes of stats on the first slice of the recount!
             // (The rest of the buffer contains lifetime tax accumulators)
@@ -969,13 +989,30 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             if p_wg_count > 0 {
                 pass.dispatch_workgroups(p_wg_count, 1, 1);
             }
-            
-            // 2b. Car transform pass (every frame) - uses the same thread counts as movement
-            pass.set_pipeline(car_transform_pipe);
-            if p_wg_count > 0 {
-                pass.dispatch_workgroups(p_wg_count, 1, 1);
-            }
             drop(pass);
+
+            // 2b. Car clear/transform pass (every frame)
+            if let Some(car_clear_pipe) = pipeline_cache.get_compute_pipeline(gpu_pipeline.car_clear_pipeline) {
+                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                    label: Some("gpu_sim_car_transform_pass"),
+                    ..default()
+                });
+                pass.set_bind_group(0, bg, &[]);
+
+                // First, clear the tail of the transforms texture
+                pass.set_pipeline(car_clear_pipe);
+                let car_wg_count = (params.car_capacity + 63) / 64;
+                if car_wg_count > 0 {
+                    pass.dispatch_workgroups(car_wg_count, 1, 1);
+                }
+
+                // Then, compute and pack active car transforms
+                pass.set_pipeline(car_transform_pipe);
+                if p_wg_count > 0 {
+                    pass.dispatch_workgroups(p_wg_count, 1, 1);
+                }
+                drop(pass);
+            }
 
             // 3. People logic pass
             if params.logic_count > 0 {
@@ -1310,6 +1347,7 @@ pub fn update_gpu_sim_params(
     grid: &crate::sim::grid::CityGrid,
     gpu_params: &mut GpuSimParams,
     entry_seg: u32,
+    car_capacity: u32,
 ) {
     gpu_params.dt = time.delta_secs();
     gpu_params.home_duration = durations.home;
@@ -1336,4 +1374,5 @@ pub fn update_gpu_sim_params(
     gpu_params.grid_h = grid.height;
     gpu_params.entry_seg = entry_seg;
     gpu_params.collisions_enabled = settings.collisions_enabled;
+    gpu_params.car_capacity = car_capacity;
 }

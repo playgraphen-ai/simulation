@@ -173,20 +173,28 @@ struct InspectorThrottler {
     last_frame: u32,
 }
 
+use bevy::ecs::system::SystemParam;
+
+#[derive(SystemParam)]
+struct SimStateParams<'w> {
+    time: Res<'w, Time>,
+    durations: Res<'w, ActivityDurations>,
+    settings: Res<'w, SimSettings>,
+    people: Res<'w, PeopleData>,
+    buildings: Res<'w, BuildingData>,
+    roads: Res<'w, RoadData>,
+    grid: Res<'w, crate::sim::grid::CityGrid>,
+    schedule: Res<'w, SimScheduleState>,
+    car_setup: Res<'w, crate::render::cars::CarsSetup>,
+}
+
 fn sync_gpu_textures_and_params(
     dt: Option<Res<DataTextures>>,
     mut gpu_tex: ResMut<gpu_sim::GpuSimTextures>,
-    time: Res<Time>,
-    durations: Res<ActivityDurations>,
-    settings: Res<SimSettings>,
-    people: Res<PeopleData>,
-    buildings: Res<BuildingData>,
-    roads: Res<RoadData>,
-    grid: Res<crate::sim::grid::CityGrid>,
+    state: SimStateParams,
     mut pending: ResMut<spawn::PendingGpuSpawns>,
     mut gpu_params: ResMut<gpu_sim::GpuSimParams>,
     mut path_params: ResMut<gpu_pathfinding::PathParams>,
-    schedule: Res<SimScheduleState>,
     scenario: Option<Res<crate::sim::scenario::ScenarioLayout>>,
     selection: Option<Res<crate::ui::inspector::Selection>>,
     mut throttler: Local<InspectorThrottler>,
@@ -199,13 +207,25 @@ fn sync_gpu_textures_and_params(
         gpu_tex.elevations = Some(dt.elevations.clone());
         gpu_tex.car_transforms = Some(dt.car_transforms.clone());
     }
+    
     let entry_seg = scenario.as_ref().map(|s| s.entry_seg).unwrap_or(0);
-    gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &grid, &mut gpu_params, entry_seg);
+    gpu_sim::update_gpu_sim_params(
+        &state.time, 
+        &state.durations, 
+        &state.settings, 
+        &state.people, 
+        &state.buildings, 
+        &state.roads, 
+        &state.grid, 
+        &mut gpu_params, 
+        entry_seg, 
+        state.car_setup.capacity
+    );
 
     // Inspector throttling
     let mut do_inspector = 0;
     if let Some(sel) = selection {
-        let now = time.elapsed_secs_f64();
+        let now = state.time.elapsed_secs_f64();
         if sel.changed_frame != throttler.last_frame || (now - throttler.last_update) > 0.2 {
             do_inspector = 1;
             throttler.last_update = now;
@@ -214,8 +234,7 @@ fn sync_gpu_textures_and_params(
     }
     gpu_params.do_inspector_readback = do_inspector;
 
-    let frame = schedule.current_frame;
-
+    let frame = state.schedule.current_frame;
 
     if frame == 0 {
         path_params.reset_path_queue = 1;
@@ -223,7 +242,7 @@ fn sync_gpu_textures_and_params(
         if pending.count > 0 {
             let spawn_this_cycle = pending.count.min(50000);
             gpu_params.spawn_count = spawn_this_cycle;
-            gpu_params.spawn_start_index = people.len.saturating_sub(pending.count);
+            gpu_params.spawn_start_index = state.people.len.saturating_sub(pending.count);
             pending.count -= spawn_this_cycle;
         } else {
             gpu_params.spawn_count = 0;
@@ -236,17 +255,17 @@ fn sync_gpu_textures_and_params(
     }
 
     // Slice logic
-    gpu_params.cycle_frames = schedule.cycle_frames;
+    gpu_params.cycle_frames = state.schedule.cycle_frames;
     gpu_params.b_count = 0;
     gpu_params.logic_count = 0;
     gpu_params.r_count = 0;
     
     // Hardcode GPU recount to 5 slices to avoid zeroing out occupancy arrays for too long
-    gpu_params.recount_slice = schedule.recount_frame % 5;
+    gpu_params.recount_slice = state.schedule.recount_frame % 5;
     gpu_params.recount_slice_count = 5;
 
-    let c = &schedule.config;
-    let mut frame = schedule.current_frame;
+    let c = &state.schedule.config;
+    let mut frame = state.schedule.current_frame;
 
     if frame < c.gc_frames {
         gpu_params.do_occupancy_gc = 1;
@@ -256,23 +275,23 @@ fn sync_gpu_textures_and_params(
         
         if frame < c.buildings_frames {
             let f = frame;
-            let slice = (buildings.items.len() as u32 + c.buildings_frames - 1) / c.buildings_frames;
+            let slice = (state.buildings.items.len() as u32 + c.buildings_frames - 1) / c.buildings_frames;
             gpu_params.b_start = f * slice;
-            gpu_params.b_count = slice.min(buildings.items.len() as u32 - gpu_params.b_start.min(buildings.items.len() as u32));
+            gpu_params.b_count = slice.min(state.buildings.items.len() as u32 - gpu_params.b_start.min(state.buildings.items.len() as u32));
         } else {
             frame -= c.buildings_frames;
             if frame < c.people_logic_frames {
                 let f = frame;
-                let slice = (people.len as u32 + c.people_logic_frames - 1) / c.people_logic_frames;
+                let slice = (state.people.len as u32 + c.people_logic_frames - 1) / c.people_logic_frames;
                 gpu_params.logic_start = f * slice;
-                gpu_params.logic_count = slice.min(people.len as u32 - gpu_params.logic_start.min(people.len as u32));
+                gpu_params.logic_count = slice.min(state.people.len as u32 - gpu_params.logic_start.min(state.people.len as u32));
             } else {
                 frame -= c.people_logic_frames;
                 if frame < c.roads_frames {
                     let f = frame;
-                    let slice = (roads.segments.len() as u32 + c.roads_frames - 1) / c.roads_frames;
+                    let slice = (state.roads.segments.len() as u32 + c.roads_frames - 1) / c.roads_frames;
                     gpu_params.r_start = f * slice;
-                    gpu_params.r_count = slice.min(roads.segments.len() as u32 - gpu_params.r_start.min(roads.segments.len() as u32));
+                    gpu_params.r_count = slice.min(state.roads.segments.len() as u32 - gpu_params.r_start.min(state.roads.segments.len() as u32));
                 } else {
                     frame -= c.roads_frames;
                     if frame < c.pathfind_frames {
@@ -293,13 +312,13 @@ fn sync_gpu_textures_and_params(
     }
 
     // Readback only at the end of the recount cycle, AND only once every ~60 frames to save performance
-    if gpu_params.recount_slice == 4 && (schedule.recount_frame % 60) == 4 {
+    if gpu_params.recount_slice == 4 && (state.schedule.recount_frame % 60) == 4 {
         gpu_params.do_stats_readback = 1;
     } else {
         gpu_params.do_stats_readback = 0;
     }
-    path_params.roads_tex_w = roads.tex_width;
-    path_params.segments_count = roads.segments.len() as u32;
+    path_params.roads_tex_w = state.roads.tex_width;
+    path_params.segments_count = state.roads.segments.len() as u32;
     path_params.max_path_len = 256;
 }
 

@@ -71,11 +71,13 @@ struct GpuStats {
     residential_assigned: atomic<u32>,
     office_assigned: atomic<u32>,
     bankrupt_count: atomic<u32>,
+    active_car_count: atomic<u32>,
     tax_income_total: atomic<u32>,
     tax_rent_total: atomic<u32>,
     tax_consumption_total: atomic<u32>,
     live_car_count: atomic<u32>,
-};
+}
+;
 
 @group(0) @binding(0) var people_tex: texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(1) var roads_tex: texture_storage_2d<rgba32float, read_write>;

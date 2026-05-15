@@ -40,11 +40,37 @@ struct CarMaterialParams {
     recount_slice: u32,
     recount_slice_count: u32,
     do_occupancy_gc: u32,
+    do_inspector_readback: u32,
+    car_capacity: u32,
+}
+
+struct GpuStats {
+    people_count: u32,
+    home_count: u32,
+    work_count: u32,
+    shop_count: u32,
+    travelling_count: u32,
+    total_money: u32,
+    residential_occupancy: u32,
+    office_occupancy: u32,
+    shop_occupancy: u32,
+    residential_count: u32,
+    office_count: u32,
+    shop_count_b: u32,
+    residential_assigned: u32,
+    office_assigned: u32,
+    bankrupt_count: u32,
+    active_car_count: atomic<u32>,
+    tax_income_total: u32,
+    tax_rent_total: u32,
+    tax_consumption_total: u32,
+    live_car_count: u32,
 }
 
 @group(0) @binding(0) var people_tex: texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(1) var roads_tex: texture_storage_2d<rgba32float, read_write>;
 @group(0) @binding(3) var<uniform> params: CarMaterialParams;
+@group(0) @binding(7) var<storage, read_write> stats: GpuStats;
 @group(0) @binding(10) var road_points_tex: texture_2d<f32>;
 @group(0) @binding(11) var elevations_tex: texture_2d<f32>;
 @group(0) @binding(12) var car_transforms_tex: texture_storage_2d<rgba32float, read_write>;
@@ -54,6 +80,27 @@ fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
     let K = vec4<f32>(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
     let p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
     return c.z * mix(K.xxx, clamp(p - K.xxx, vec3<f32>(0.0), vec3<f32>(1.0)), c.y);
+}
+
+@compute @workgroup_size(64)
+fn main_clear(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let idx = global_id.x;
+    if idx >= params.car_capacity { return; }
+
+    let t_w = 1024u;
+    let t_idx = idx * 4u;
+    
+    let tx0 = t_idx % t_w;
+    let ty0 = t_idx / t_w;
+    textureStore(car_transforms_tex, vec2<i32>(i32(tx0), i32(ty0)), vec4<f32>(0.0, -10000.0, 0.0, 0.0));
+    
+    let tx1 = (t_idx + 1u) % t_w;
+    let ty1 = (t_idx + 1u) / t_w;
+    textureStore(car_transforms_tex, vec2<i32>(i32(tx1), i32(ty1)), vec4<f32>(0.0));
+
+    let tx2 = (t_idx + 2u) % t_w;
+    let ty2 = (t_idx + 2u) / t_w;
+    textureStore(car_transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), vec4<f32>(0.0));
 }
 
 @compute @workgroup_size(64)
@@ -83,8 +130,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     );
     // Flag for coloring: 0.0 = normal, 1.0 = white (abandoning)
     var is_white = 0.0;
+    var has_car = false;
 
     if (activity == 0.0 || activity == 4.0) && current_seg != 0xFFFFFFFFu {
+        has_car = true;
         if activity == 4.0 { is_white = 1.0; }
         let rw = i32(params.roads_tex_w);
         
@@ -176,20 +225,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
 
-    let t_w = 1024u;
-    let t_idx = pid * 4u; // Each car now takes 4 texels for alignment and extra data
-    
-    let tx0 = t_idx % t_w;
-    let ty0 = t_idx / t_w;
-    textureStore(car_transforms_tex, vec2<i32>(i32(tx0), i32(ty0)), vec4<f32>(world_pos.x, world_pos.y, world_pos.z, is_white));
-    
-    let tx1 = (t_idx + 1u) % t_w;
-    let ty1 = (t_idx + 1u) / t_w;
-    textureStore(car_transforms_tex, vec2<i32>(i32(tx1), i32(ty1)), vec4<f32>(rot_matrix[2].x, rot_matrix[2].z, rot_matrix[0].x, rot_matrix[0].z));
+    if has_car {
+        let out_idx = atomicAdd(&stats.active_car_count, 1u);
+        if out_idx < params.car_capacity {
+            let t_w = 1024u;
+            let t_idx = out_idx * 4u;
+            
+            let tx0 = t_idx % t_w;
+            let ty0 = t_idx / t_w;
+            textureStore(car_transforms_tex, vec2<i32>(i32(tx0), i32(ty0)), vec4<f32>(world_pos.x, world_pos.y, world_pos.z, is_white));
+            
+            let tx1 = (t_idx + 1u) % t_w;
+            let ty1 = (t_idx + 1u) / t_w;
+            textureStore(car_transforms_tex, vec2<i32>(i32(tx1), i32(ty1)), vec4<f32>(rot_matrix[2].x, rot_matrix[2].z, rot_matrix[0].x, rot_matrix[0].z));
 
-    let tx2 = (t_idx + 2u) % t_w;
-    let ty2 = (t_idx + 2u) / t_w;
-    let hue = fract(f32(pid) * 0.6180339887);
-    let color = hsv2rgb(vec3<f32>(hue, 0.8, 0.9));
-    textureStore(car_transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), vec4<f32>(color.r, color.g, color.b, 1.0));
+            let tx2 = (t_idx + 2u) % t_w;
+            let ty2 = (t_idx + 2u) / t_w;
+            let hue = fract(f32(pid) * 0.6180339887);
+            let color = hsv2rgb(vec3<f32>(hue, 0.8, 0.9));
+            textureStore(car_transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), vec4<f32>(color.r, color.g, color.b, 1.0));
+        }
+    }
 }

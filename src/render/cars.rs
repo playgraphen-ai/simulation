@@ -12,7 +12,6 @@ use bevy::{
     shader::ShaderRef,
 };
 
-use crate::sim::people::PEOPLE_CAPACITY;
 use crate::sim::textures::DataTextures;
 
 pub const ATTRIBUTE_CAR_ID: bevy::mesh::MeshVertexAttribute = bevy::mesh::MeshVertexAttribute::new("Vertex_CarId", 998, VertexFormat::Float32);
@@ -28,9 +27,9 @@ impl Plugin for CarsRenderPlugin {
 }
 
 #[derive(Resource, Default)]
-struct CarsSetup {
-    capacity: u32,
-    entity: Option<Entity>,
+pub struct CarsSetup {
+    pub capacity: u32,
+    pub entity: Option<Entity>,
 }
 
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
@@ -87,17 +86,18 @@ fn setup_cars(
     people: Option<Res<crate::sim::people::PeopleData>>,
     roads: Option<Res<crate::sim::roads::RoadData>>,
     grid: Option<Res<crate::sim::grid::CityGrid>>,
+    counters: Res<crate::sim::counters::SimCounters>,
     mut setup: ResMut<CarsSetup>,
 ) {
     if let (Some(dt), Some(people), Some(roads), Some(grid)) = (dt, people, roads, grid) {
-        if people.len <= setup.capacity && setup.capacity > 0 {
+        // Round up to next 10,000 chunk
+        let target_capacity = ((counters.cars / 10000) + 1) * 10000;
+
+        if target_capacity <= setup.capacity && setup.capacity > 0 {
             return; // We have enough capacity in the current mesh
         }
 
-        // Initialize with actual population count instead of PEOPLE_CAPACITY
-        // We add a buffer of 1000 to avoid recreating the mesh too frequently
-        let initial_capacity = (people.len + 1000).max(1000).min(PEOPLE_CAPACITY);
-        setup.capacity = initial_capacity;
+        setup.capacity = target_capacity;
 
         if let Some(entity) = setup.entity {
             commands.entity(entity).despawn();
@@ -120,7 +120,7 @@ fn setup_cars(
             bevy::mesh::Indices::U32(i) => i.clone(),
         };
 
-        for car_id in 0..initial_capacity {
+        for car_id in 0..setup.capacity {
             let vertex_offset = positions.len() as u32;
             positions.extend(base_positions);
             normals.extend(base_normals);
