@@ -165,6 +165,12 @@ fn setup_data_textures(
     commands.insert_resource(dt);
 }
 
+#[derive(Default)]
+struct InspectorThrottler {
+    last_update: f64,
+    last_frame: u32,
+}
+
 fn sync_gpu_textures_and_params(
     dt: Option<Res<DataTextures>>,
     mut gpu_tex: ResMut<gpu_sim::GpuSimTextures>,
@@ -180,6 +186,8 @@ fn sync_gpu_textures_and_params(
     mut path_params: ResMut<gpu_pathfinding::PathParams>,
     schedule: Res<SimScheduleState>,
     scenario: Option<Res<crate::sim::scenario::ScenarioLayout>>,
+    selection: Option<Res<crate::ui::inspector::Selection>>,
+    mut throttler: Local<InspectorThrottler>,
 ) {
     if let Some(dt) = dt {
         gpu_tex.people = Some(dt.people.clone());
@@ -189,10 +197,23 @@ fn sync_gpu_textures_and_params(
         gpu_tex.elevations = Some(dt.elevations.clone());
         gpu_tex.car_transforms = Some(dt.car_transforms.clone());
     }
-    let entry_seg = scenario.map(|s| s.entry_seg).unwrap_or(0);
+    let entry_seg = scenario.as_ref().map(|s| s.entry_seg).unwrap_or(0);
     gpu_sim::update_gpu_sim_params(&time, &durations, &settings, &people, &buildings, &roads, &grid, &mut gpu_params, entry_seg);
-    
+
+    // Inspector throttling
+    let mut do_inspector = 0;
+    if let Some(sel) = selection {
+        let now = time.elapsed_secs_f64();
+        if sel.changed_frame != throttler.last_frame || (now - throttler.last_update) > 0.2 {
+            do_inspector = 1;
+            throttler.last_update = now;
+            throttler.last_frame = sel.changed_frame;
+        }
+    }
+    gpu_params.do_inspector_readback = do_inspector;
+
     let frame = schedule.current_frame;
+
 
     if frame == 0 {
         path_params.reset_path_queue = 1;
