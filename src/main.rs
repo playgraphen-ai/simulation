@@ -27,6 +27,7 @@ pub struct TimingEvent {
     pub bldg: f32,
     pub road: f32,
     pub pathfind: f32,
+    pub recount: f32,
     pub render: f32,
     
     // Cycle info
@@ -69,6 +70,7 @@ pub struct DetailedTimings {
     pub last_bldg_ms: f32,
     pub last_road_ms: f32,
     pub last_pathfind_ms: f32,
+    pub last_recount_ms: f32,
     
     // Smoothed values for UI
     pub smooth_update_ms: f32,
@@ -79,11 +81,13 @@ pub struct DetailedTimings {
     pub smooth_bldg_ms: f32,
     pub smooth_road_ms: f32,
     pub smooth_pathfind_ms: f32,
+    pub smooth_recount_ms: f32,
 
     pub peak_logic_ms: f32,
     pub peak_bldg_ms: f32,
     pub peak_road_ms: f32,
     pub peak_pathfind_ms: f32,
+    pub peak_recount_ms: f32,
     
     // Cycle progress
     pub recount_cycle: Option<(u32, u32)>,
@@ -215,6 +219,7 @@ fn start_timing(mut timings: ResMut<DetailedTimings>) {
     timings.last_bldg_ms = 0.0;
     timings.last_road_ms = 0.0;
     timings.last_pathfind_ms = 0.0;
+    timings.last_recount_ms = 0.0;
 }
 
 fn receive_timings(
@@ -228,6 +233,7 @@ fn receive_timings(
             if event.bldg > 0.0 { timings.last_bldg_ms += event.bldg; }
             if event.road > 0.0 { timings.last_road_ms += event.road; }
             if event.pathfind > 0.0 { timings.last_pathfind_ms += event.pathfind; }
+            if event.recount > 0.0 { timings.last_recount_ms += event.recount; }
             if event.render > 0.0 { timings.last_render_ms += event.render; }
 
             if let Some(cycle) = event.recount_cycle { timings.recount_cycle = Some(cycle); }
@@ -294,6 +300,12 @@ fn receive_timings(
             timings.smooth_pathfind_ms = timings.smooth_pathfind_ms * (1.0 - alpha) + timings.last_pathfind_ms * alpha;
             if timings.last_pathfind_ms > timings.peak_pathfind_ms {
                 timings.peak_pathfind_ms = timings.last_pathfind_ms;
+            }
+        }
+        if timings.last_recount_ms > 0.0 {
+            timings.smooth_recount_ms = timings.smooth_recount_ms * (1.0 - alpha) + timings.last_recount_ms * alpha;
+            if timings.last_recount_ms > timings.peak_recount_ms {
+                timings.peak_recount_ms = timings.last_recount_ms;
             }
         }
         

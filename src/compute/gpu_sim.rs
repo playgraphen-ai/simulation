@@ -917,6 +917,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
 
             // --- RECOUNT PASS ---
             // Recount pass (Sliced over 5 frames, 64 people per thread)
+            let recount_start_time = std::time::Instant::now();
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                 label: Some("gpu_sim_recount_pass"),
                 ..default()
@@ -935,6 +936,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 event.recount_cycle = Some((params.recount_slice + 1, slice_count));
             }
             drop(pass);
+            event.recount = recount_start_time.elapsed().as_secs_f32() * 1000.0;
 
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                 label: Some("gpu_sim_pass"),

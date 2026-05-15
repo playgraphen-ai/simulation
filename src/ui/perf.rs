@@ -76,7 +76,7 @@ pub fn update_perf_ui(
             let entities = diagnostics.get(&EntityCountDiagnosticsPlugin::ENTITY_COUNT).and_then(|d| d.smoothed()).unwrap_or(0.0);
             
             text.0 = format!(
-                "Frame: {:.1} ms\nLogic CPU: {:.1} ms\nCompute: {:.1} ms\n  - Logic: {:.3} ms (Peak: {:.3} ms)\n  - Bldgs: {:.3} ms (Peak: {:.3} ms)\n  - Roads: {:.3} ms (Peak: {:.3} ms)\n  - Path: {:.3} ms (Peak: {:.3} ms)\nRender: {:.1} ms\nCPU: {:.1} %\nRAM: {:.0} MB\nEntities: {}\n\nCycles:\n  - Logic: {}/{}\n  - Bldgs: {}/{}\n  - Roads: {}/{}\n  - Recount: {}/{}\n\nReadbacks:\n  - Stats: {:.1} ms\n  - Person: {:.1} ms\n  - Bldg: {:.1} ms\n\nThroughput:\n  - Logic: {:.0} /ms\n  - Path: {:.0} /ms\n\nBuffer Occupancy:\n  - People: {:.1}%\n  - Bldgs: {:.1}%\n  - Segments: {:.1}%",
+                "Frame: {:.1} ms\nLogic CPU: {:.1} ms\nCompute: {:.1} ms\n  - Logic: {:.3} ms (Peak: {:.3} ms)\n  - Bldgs: {:.3} ms (Peak: {:.3} ms)\n  - Roads: {:.3} ms (Peak: {:.3} ms)\n  - Path: {:.3} ms (Peak: {:.3} ms)\n  - Recnt: {:.3} ms (Peak: {:.3} ms)\nRender: {:.1} ms\nCPU: {:.1} %\nRAM: {:.0} MB\nEntities: {}\n\nCycles:\n  - Logic: {}/{}\n  - Bldgs: {}/{}\n  - Roads: {}/{}\n  - Recount: {}/{}\n\nReadbacks:\n  - Stats: {:.1} ms\n  - Person: {:.1} ms\n  - Bldg: {:.1} ms\n\nThroughput:\n  - Logic: {:.0} /ms\n  - Path: {:.0} /ms\n\nBuffer Occupancy:\n  - People: {:.1}%\n  - Bldgs: {:.1}%\n  - Segments: {:.1}%",
                 frame_time, 
                 timings.smooth_update_ms, 
                 timings.smooth_compute_ms, 
@@ -84,6 +84,7 @@ pub fn update_perf_ui(
                 timings.smooth_bldg_ms, timings.peak_bldg_ms,
                 timings.smooth_road_ms, timings.peak_road_ms,
                 timings.smooth_pathfind_ms, timings.peak_pathfind_ms,
+                timings.smooth_recount_ms, timings.peak_recount_ms,
                 timings.smooth_render_ms, 
                 cpu, 
                 ram, 
