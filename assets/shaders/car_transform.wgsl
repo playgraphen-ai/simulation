@@ -42,6 +42,11 @@ struct CarMaterialParams {
     do_occupancy_gc: u32,
     do_inspector_readback: u32,
     car_capacity: u32,
+    max_people: u32,
+    max_segments: u32,
+    max_buildings: u32,
+    max_path_len: u32,
+    max_path_requests: u32,
 }
 
 struct GpuStats {

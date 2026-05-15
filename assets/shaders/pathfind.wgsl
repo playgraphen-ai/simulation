@@ -11,6 +11,8 @@ struct PathParams {
     do_dispatch: u32,
     reset_path_queue: u32,
     major_segments_count: u32,
+    max_people: u32,
+    max_requests: u32,
 };
 
 struct PathRequest {
@@ -61,9 +63,9 @@ fn set_prev_ht(base: u32, key: u32, val: u32) -> bool {
     let v16 = val & 0xFFFFu;
     let new_entry = (k16 << 16u) | v16;
     
-    var h = hash_u32(key) % 512u;
+    var h = hash_u32(key) % params.max_path_len;
     for (var i: u32 = 0u; i < 64u; i = i + 1u) { 
-        let slot = base + ((h + i) % 512u);
+        let slot = base + ((h + i) % params.max_path_len);
         let res = atomicCompareExchangeWeak(&prev[slot], 0xFFFFFFFFu, new_entry);
         if res.exchanged {
             return true;
@@ -77,9 +79,9 @@ fn set_prev_ht(base: u32, key: u32, val: u32) -> bool {
 
 fn get_prev_ht(base: u32, key: u32) -> i32 {
     let k16 = key & 0xFFFFu;
-    var h = hash_u32(key) % 512u;
+    var h = hash_u32(key) % params.max_path_len;
     for (var i: u32 = 0u; i < 64u; i = i + 1u) {
-        let slot = base + ((h + i) % 512u);
+        let slot = base + ((h + i) % params.max_path_len);
         let entry = atomicLoad(&prev[slot]);
         if entry == 0xFFFFFFFFu { return -1; }
         if (entry >> 16u) == k16 {
@@ -115,7 +117,7 @@ var<workgroup> min_h: f32;
 var<workgroup> shared_use_hierarchical: u32;
 
 fn pack_f(f: f32, id: u32) -> u32 {
-    let f_u = u32(clamp(f * 100.0, 0.0, 524287.0));
+    let f_u = u32(clamp(f * 100.0, 0.0, f32(params.max_people - 1u)));
     return (f_u << 13) | (id & 0x1FFFu);
 }
 
@@ -157,7 +159,7 @@ fn main(
     }
     workgroupBarrier();
     let req_id = shared_req_id;
-    let max_req = min(atomicLoad(&path_queue.count_x), 131072u);
+    let max_req = min(atomicLoad(&path_queue.count_x), params.max_requests);
 
     let is_valid_req = req_id < max_req;
     var req: PathRequest;
@@ -165,12 +167,12 @@ fn main(
         req = path_queue.requests[req_id];
     }
 
-    // Each request has exactly 512 entries in prev.
-    let base_prev = req_id * 512u;
+    // Each request has exactly params.max_path_len entries in prev.
+    let base_prev = req_id * params.max_path_len;
 
-    // Initialize only our window of 512 entries.
+    // Initialize only our window of entries.
     var init_idx = lidx;
-    while init_idx < 512u {
+    while init_idx < params.max_path_len {
         if is_valid_req {
             atomicStore(&prev[base_prev + init_idx], 0xFFFFFFFFu);
         }
@@ -302,7 +304,7 @@ fn main(
 
         // Reconstruct Hierarchical Path
         if lidx == 0u {
-            let safe_person_id = min(req.person_id, 524287u);
+            let safe_person_id = min(req.person_id, params.max_people - 1u);
             let base_path = safe_person_id * params.max_path_len;
             var cur = best_seg;
             var path_tmp: array<u32, 512>;
@@ -479,7 +481,7 @@ fn main(
 
         // Reconstruct path from best_seg.
         if lidx == 0u && is_valid_req {
-            let safe_person_id = min(req.person_id, 524287u);
+            let safe_person_id = min(req.person_id, params.max_people - 1u);
             let base_path = safe_person_id * params.max_path_len;
 
             var cur = best_seg;

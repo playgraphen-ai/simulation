@@ -13,7 +13,8 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::sim::grid::{CityGrid, Tile, ZoneType};
 
-pub const BUILDING_CAPACITY: u32 = 524288;
+use crate::sim::constants::MAX_BUILDINGS;
+pub const BUILDING_CAPACITY: u32 = MAX_BUILDINGS;
 pub const TEXELS_PER_BUILDING: u32 = 3;
 pub const MAX_LEVEL: u32 = 4;
 

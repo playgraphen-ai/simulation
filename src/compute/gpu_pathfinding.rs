@@ -47,6 +47,8 @@ pub struct PathParams {
     pub do_dispatch: u32,
     pub reset_path_queue: u32,
     pub major_segments_count: u32,
+    pub max_people: u32,
+    pub max_requests: u32,
 }
 
 impl Default for PathParams {
@@ -61,6 +63,8 @@ impl Default for PathParams {
             do_dispatch: 0, 
             reset_path_queue: 0,
             major_segments_count: 0,
+            max_people: MAX_PEOPLE,
+            max_requests: MAX_PATH_REQUESTS,
         }
     }
 }
@@ -203,6 +207,8 @@ impl FromWorld for GpuPathfindingPipeline {
     }
 }
 
+use crate::sim::constants::{MAX_PEOPLE, MAX_PATH_REQUESTS, MAX_PATH_LEN};
+
 fn prepare_path_buffers(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
@@ -214,15 +220,15 @@ fn prepare_path_buffers(
     major_graph: Res<ExtractedMajorGraph>,
     mut buffers: ResMut<GpuPathBuffers>,
 ) {
-    let max_reqs = 524288u32;
+    let max_reqs = MAX_PATH_REQUESTS;
     buffers.max_requests = max_reqs;
 
     // IMPORTANT: Sync max_path_len to match the search window.
-    params.max_path_len = 512;
+    params.max_path_len = MAX_PATH_LEN;
     params.major_segments_count = major_graph.rows.len() as u32;
 
-    let people_capacity = 524288u64; // Max people
-    let paths_size = people_capacity * 512u64 * 4u64; // 512 max path len * 4 bytes per id
+    let people_capacity = MAX_PEOPLE as u64; // Max people
+    let paths_size = people_capacity * MAX_PATH_LEN as u64 * 4u64; // 512 max path len * 4 bytes per id
     if buffers.paths.is_none() {
         let initial_data = vec![0xFFu8; paths_size as usize];
         buffers.paths = Some(render_device.create_buffer_with_data(&BufferInitDescriptor {
@@ -252,8 +258,8 @@ fn prepare_path_buffers(
         }
     }
 
-    // Fixed size: 65536 requests * 512 entries * 4 bytes per entry (u16 key, u16 val) = 128MB
-    let prev_size = max_reqs as u64 * 512u64 * 4u64;
+    // Fixed size: MAX_PATH_REQUESTS * MAX_PATH_LEN * 4 bytes
+    let prev_size = max_reqs as u64 * MAX_PATH_LEN as u64 * 4u64;
     if buffers.prev.is_none() || buffers.prev.as_ref().unwrap().size() != prev_size {
         buffers.prev = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("path_prev_buffer"),
@@ -351,7 +357,7 @@ impl bevy::render::render_graph::Node for GpuPathfindingNode {
             let mut event = crate::TimingEvent::default();
             event.pathfind = start.elapsed().as_secs_f32() * 1000.0;
             // 2048 workgroups * 64 threads = 131072 pathfinding threads per dispatch
-            event.path_count = Some(131072);
+            event.path_count = Some(MAX_PATH_REQUESTS);
             let _ = tx.send(event);
         }
 

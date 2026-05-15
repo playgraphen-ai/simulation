@@ -24,7 +24,8 @@ pub enum RoadType {
     Highway2x4,
 }
 
-pub const ROAD_CAPACITY: u32 = 8192;
+use crate::sim::constants::MAX_SEGMENTS;
+pub const ROAD_CAPACITY: u32 = MAX_SEGMENTS;
 pub const TEXELS_PER_SEGMENT: u32 = 5;
 
 #[repr(C)]

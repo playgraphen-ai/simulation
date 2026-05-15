@@ -37,7 +37,14 @@ struct SimParams {
     collisions_enabled: f32,
     recount_slice: u32,
     recount_slice_count: u32,
-    _pad0: u32,
+    do_occupancy_gc: u32,
+    do_inspector_readback: u32,
+    car_capacity: u32,
+    max_people: u32,
+    max_segments: u32,
+    max_buildings: u32,
+    max_path_len: u32,
+    max_path_requests: u32,
 };
 
 struct PathRequest {
@@ -225,10 +232,10 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
     var prev_seg = texel2.y;
 
     if activity == ACT_TRAVEL {
-        let base_idx = pid * 512u;
+        let base_idx = pid * params.max_path_len;
         let current_step = u32(path_cursor);
         
-        let max_paths = 268435456u; // 131072 * 512
+        let max_paths = params.max_people * params.max_path_len;
         if base_idx + current_step >= max_paths {
             return;
         }
@@ -403,7 +410,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
 
                 if !is_blocked {
                     activity_time = activity_time - speed * params.dt;
-                    let safe_seg = min(current_path_seg, 65535u);
+                    let safe_seg = min(current_path_seg, params.max_segments - 1u);
                     atomicAdd(&congestion[safe_seg], 1u);
                 }
 
@@ -752,14 +759,13 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
             // Queue path request
             let req_idx = atomicAdd(&path_queue.count_x, 1u);
-            let max_queue = 131072u;
-            if req_idx < max_queue {
+            if req_idx < params.max_path_requests {
                 path_queue.requests[req_idx] = PathRequest(start_seg, target_seg, pid, 0u);
             }
 
             // Reset path buffer for this person
-            let path_idx = pid * 512u;
-            if path_idx < 268435456u { // 131072 * 512 = 67108864
+            let path_idx = pid * params.max_path_len;
+            if path_idx < params.max_people * params.max_path_len {
                 person_paths[path_idx] = 0xFFFFFFFFu;
             }
 

@@ -13,7 +13,8 @@
 use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
 
-pub const PEOPLE_CAPACITY: u32 = 524288;
+use crate::sim::constants::MAX_PEOPLE;
+pub const PEOPLE_CAPACITY: u32 = MAX_PEOPLE;
 pub const TEXELS_PER_PERSON: u32 = 3;
 
 #[repr(C)]

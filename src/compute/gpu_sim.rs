@@ -125,7 +125,7 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender};
 
 use crate::sim::people::PeopleData;
-use crate::sim::buildings::{BuildingData, BUILDING_CAPACITY};
+use crate::sim::buildings::BuildingData;
 use crate::sim::{ActivityDurations, SimSettings};
 
 #[repr(C)]
@@ -299,6 +299,8 @@ pub struct GpuSimTextures {
     pub car_transforms: Option<Handle<Image>>,
 }
 
+use crate::sim::constants::{MAX_PEOPLE, MAX_BUILDINGS, MAX_SEGMENTS, MIN_GPU_BUFFER_CAPACITY, MAX_PATH_LEN, MAX_PATH_REQUESTS};
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable, Resource, ExtractResource, ShaderType)]
 pub struct GpuSimParams {
@@ -343,6 +345,11 @@ pub struct GpuSimParams {
     pub do_occupancy_gc: u32,
     pub do_inspector_readback: u32,
     pub car_capacity: u32,
+    pub max_people: u32,
+    pub max_segments: u32,
+    pub max_buildings: u32,
+    pub max_path_len: u32,
+    pub max_path_requests: u32,
 }
 
 impl Default for GpuSimParams {
@@ -389,6 +396,11 @@ impl Default for GpuSimParams {
             do_occupancy_gc: 0,
             do_inspector_readback: 0,
             car_capacity: 0,
+            max_people: MAX_PEOPLE,
+            max_segments: MAX_SEGMENTS,
+            max_buildings: MAX_BUILDINGS,
+            max_path_len: MAX_PATH_LEN,
+            max_path_requests: MAX_PATH_REQUESTS,
         }
     }
 }
@@ -744,7 +756,7 @@ fn prepare_gpu_sim_buffers(
     }
 
     // Congestion buffer: segments_count * 4 bytes
-    let max_segs = 65536u64; 
+    let max_segs = MAX_SEGMENTS as u64; 
     if congestion.0.is_none() || congestion.0.as_ref().unwrap().size() < (max_segs * 4) {
         congestion.0 = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_congestion_buffer"),
@@ -766,7 +778,7 @@ fn prepare_gpu_sim_buffers(
     if b_stats.0.is_none() {
         b_stats.0 = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_building_stats_buffer"),
-            size: (BUILDING_CAPACITY as u64).max(65536) * 12, // 3 u32 per building (occupants, assigned, tax) = 12 bytes
+            size: (MAX_BUILDINGS as u64).max(MIN_GPU_BUFFER_CAPACITY as u64) * 12, // 3 u32 per building (occupants, assigned, tax) = 12 bytes
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         }));
@@ -776,7 +788,7 @@ fn prepare_gpu_sim_buffers(
     if occupancy.0.is_none() || occupancy.0.as_ref().unwrap().size() < (grid_size * 4) {
         occupancy.0 = Some(render_device.create_buffer(&BufferDescriptor {
             label: Some("gpu_occupancy_buffer"),
-            size: grid_size.max(65536) * 4,
+            size: grid_size.max(MIN_GPU_BUFFER_CAPACITY as u64) * 4,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST | BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         }));
@@ -1141,9 +1153,9 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             event.total_compute = start.elapsed().as_secs_f32() * 1000.0;
             
             // Collect occupancy data
-            event.occ_people = Some((params.people_count, 524288)); // HARDCODED from MAX_PEOPLE
-            event.occ_bldgs = Some((params.buildings_count, crate::sim::buildings::BUILDING_CAPACITY as u32));
-            event.occ_segments = Some((params.segments_count, 65536)); // HARDCODED max segments
+            event.occ_people = Some((params.people_count, params.max_people));
+            event.occ_bldgs = Some((params.buildings_count, params.max_buildings));
+            event.occ_segments = Some((params.segments_count, params.max_segments));
 
             let _ = tx.send(event);
         }
@@ -1375,4 +1387,9 @@ pub fn update_gpu_sim_params(
     gpu_params.entry_seg = entry_seg;
     gpu_params.collisions_enabled = settings.collisions_enabled;
     gpu_params.car_capacity = car_capacity;
+    gpu_params.max_people = MAX_PEOPLE;
+    gpu_params.max_segments = MAX_SEGMENTS;
+    gpu_params.max_buildings = MAX_BUILDINGS;
+    gpu_params.max_path_len = MAX_PATH_LEN;
+    gpu_params.max_path_requests = MAX_PATH_REQUESTS;
 }

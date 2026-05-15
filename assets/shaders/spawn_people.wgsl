@@ -34,15 +34,22 @@ struct SimParams {
     r_start: u32,
     r_count: u32,
     cycle_frames: u32,
-    do_readback: u32,
+    do_stats_readback: u32,
     reset_stats: u32,
     grid_w: u32,
     grid_h: u32,
     entry_seg: u32,
     collisions_enabled: f32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
+    recount_slice: u32,
+    recount_slice_count: u32,
+    do_occupancy_gc: u32,
+    do_inspector_readback: u32,
+    car_capacity: u32,
+    max_people: u32,
+    max_segments: u32,
+    max_buildings: u32,
+    max_path_len: u32,
+    max_path_requests: u32,
 };
 
 struct PathRequest {
@@ -272,8 +279,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(people_tex, p_coords[2], texel2);
 
     // Reset path buffer for this person
-    let path_idx = pid * 512u;
-    if path_idx < 268435456u { // 131072 * 512
+    let path_idx = pid * params.max_path_len;
+    if path_idx < params.max_people * params.max_path_len {
         person_paths[path_idx] = 0xFFFFFFFFu;
     }
 }

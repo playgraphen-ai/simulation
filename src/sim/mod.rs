@@ -13,6 +13,7 @@ pub mod buildings;
 pub mod textures;
 pub mod counters;
 pub mod scenario;
+pub mod constants;
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
