@@ -33,7 +33,7 @@ pub struct LogPlugin;
 
 impl Plugin for LogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, json_logger_system);
+        app.add_systems(Update, json_logger_system.run_if(in_state(crate::AppState::InGame)));
     }
 }
 

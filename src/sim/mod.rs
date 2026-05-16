@@ -38,7 +38,6 @@ impl Plugin for SimPlugin {
             .add_systems(OnEnter(AppState::InGame), (startup, scenario::build_starter_scenario).chain());
         app.add_systems(Update, (
                 counters::update_counters_system,
-                crate::log_export::json_logger_system,
                 update_game_time,
             ).run_if(in_state(AppState::InGame)));
     }
