@@ -116,13 +116,13 @@ for i in 0..7 {
     // Vertical
     let hx = offsets[0].0 + i * spacing + city_w + gap_w / 2;
     for y in y_min..=y_max {
-        roads.push_link((hx, y), (hx, y.saturating_sub(1).max(y_min)), RoadType::Highway2x4);
+        roads.push_link((hx, y), (hx, y.saturating_sub(1).max(y_min)), RoadType::Highway2x8);
     }
     
     // Horizontal
     let hy = offsets[0].1 + i * spacing + city_h + gap_h / 2;
     for x in x_min..=x_max {
-        roads.push_link((x, hy), (x.saturating_sub(1).max(x_min), hy), RoadType::Highway2x4);
+        roads.push_link((x, hy), (x.saturating_sub(1).max(x_min), hy), RoadType::Highway2x8);
     }
 }
 
@@ -138,7 +138,7 @@ for cy in 0..8 {
             let x_start = current.0 + city_w;
             let y = current.1 + mid_oy;
             for x in x_start..=hx {
-                roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y), RoadType::Highway);
+                roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y), RoadType::Highway2x4);
             }
         }
         
@@ -149,7 +149,7 @@ for cy in 0..8 {
             let x_end = current.0;
             let y = current.1 + mid_oy;
             for x in x_start..=x_end {
-                roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y), RoadType::Highway);
+                roads.push_link((x, y), (x.saturating_sub(1).max(x_start), y), RoadType::Highway2x4);
             }
         }
 
@@ -159,7 +159,7 @@ for cy in 0..8 {
             let y_start = current.1 + city_h;
             let x = current.0 + mid_ox;
             for y in y_start..=hy {
-                roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)), RoadType::Highway);
+                roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)), RoadType::Highway2x4);
             }
         }
         
@@ -170,7 +170,7 @@ for cy in 0..8 {
             let y_end = current.1;
             let x = current.0 + mid_ox;
             for y in y_start..=y_end {
-                roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)), RoadType::Highway);
+                roads.push_link((x, y), (x, y.saturating_sub(1).max(y_start)), RoadType::Highway2x4);
             }
         }
     }
@@ -185,9 +185,9 @@ let tile_to_seg = roads.rebuild_topology();
     for ((tx, ty), seg_id) in tile_to_seg {
         let rtype = roads.segments[seg_id as usize].road_type;
         match rtype {
-            RoadType::Highway2x4 => {
-                for dx in -2..=3 {
-                    for dy in -2..=3 {
+            RoadType::Highway2x8 => {
+                for dx in -4..=5 {
+                    for dy in -4..=5 {
                         let nx = tx as i32 + dx;
                         let ny = ty as i32 + dy;
                         if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {
@@ -196,9 +196,9 @@ let tile_to_seg = roads.rebuild_topology();
                     }
                 }
             }
-            RoadType::Highway => {
-                for dx in -1..=2 {
-                    for dy in -1..=2 {
+            RoadType::Highway2x4 => {
+                for dx in -2..=3 {
+                    for dy in -2..=3 {
                         let nx = tx as i32 + dx;
                         let ny = ty as i32 + dy;
                         if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {

@@ -188,15 +188,16 @@ fn main_people_occupancy(@builtin(global_invocation_id) gid: vec3<u32>) {
         let side = vec2<f32>(-dir.y, dir.x);
         
         var offset = select(0.35, -0.35, start_at_b);
-        if rtype == 1.0 {
-            let lane = f32(pid % 2u);
-            let lane_offset = 0.5 + lane * 1.0;
-            offset = select(lane_offset, -lane_offset, start_at_b);
-        } else if rtype == 2.0 {
+        if rtype == 1.0 { // Highway2x4
             let lane = f32(pid % 4u);
             let lane_offset = 0.5 + lane * 0.675;
             offset = select(lane_offset, -lane_offset, start_at_b);
+        } else if rtype == 2.0 { // Highway2x8
+            let lane = f32(pid % 8u);
+            let lane_offset = 0.5 + lane * 0.45;
+            offset = select(lane_offset, -lane_offset, start_at_b);
         }
+
         
         let pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), frac) + side * offset;
         let tx = u32(pos.x + 0.5);
@@ -322,15 +323,16 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let side = vec2<f32>(-dir.y, dir.x);
                 
                 var offset = select(0.35, -0.35, start_at_b);
-                if rtype == 1.0 {
-                    let lane = f32(pid % 2u);
-                    let lane_offset = 0.5 + lane * 1.0;
-                    offset = select(lane_offset, -lane_offset, start_at_b);
-                } else if rtype == 2.0 {
+                if rtype == 1.0 { // Highway2x4
                     let lane = f32(pid % 4u);
                     let lane_offset = 0.5 + lane * 0.675;
                     offset = select(lane_offset, -lane_offset, start_at_b);
+                } else if rtype == 2.0 { // Highway2x8
+                    let lane = f32(pid % 8u);
+                    let lane_offset = 0.5 + lane * 0.45;
+                    offset = select(lane_offset, -lane_offset, start_at_b);
                 }
+
 
                 let current_pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), current_frac) + side * offset;
                 var reserved_idx = i32(texel0.y); // Read persistent occupancy index
@@ -381,15 +383,16 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
                             let n_side = vec2<f32>(-n_dir.y, n_dir.x);
                             
                             var n_offset = select(0.35, -0.35, next_start_at_b);
-                            if n_rtype == 1.0 {
-                                let lane = f32(pid % 2u);
-                                let lane_offset = 0.5 + lane * 1.0;
-                                n_offset = select(lane_offset, -lane_offset, next_start_at_b);
-                            } else if n_rtype == 2.0 {
+                            if rtype == 1.0 { // Highway2x4
                                 let lane = f32(pid % 4u);
                                 let lane_offset = 0.5 + lane * 0.675;
-                                n_offset = select(lane_offset, -lane_offset, next_start_at_b);
+                                offset = select(lane_offset, -lane_offset, start_at_b);
+                            } else if rtype == 2.0 { // Highway2x8
+                                let lane = f32(pid % 8u);
+                                let lane_offset = 0.5 + lane * 0.45;
+                                offset = select(lane_offset, -lane_offset, start_at_b);
                             }
+
 
                             let n_frac = select(0.1, 0.9, next_start_at_b);
                             
@@ -984,15 +987,16 @@ fn main_occupancy_gc_repopulate(@builtin(global_invocation_id) gid: vec3<u32>) {
         let side = vec2<f32>(-dir.y, dir.x);
         
         var offset = select(0.35, -0.35, start_at_b);
-        if rtype == 1.0 {
-            let lane = f32(pid % 2u);
-            let lane_offset = 0.5 + lane * 1.0;
-            offset = select(lane_offset, -lane_offset, start_at_b);
-        } else if rtype == 2.0 {
+        if rtype == 1.0 { // Highway2x4
             let lane = f32(pid % 4u);
             let lane_offset = 0.5 + lane * 0.675;
             offset = select(lane_offset, -lane_offset, start_at_b);
+        } else if rtype == 2.0 { // Highway2x8
+            let lane = f32(pid % 8u);
+            let lane_offset = 0.5 + lane * 0.45;
+            offset = select(lane_offset, -lane_offset, start_at_b);
         }
+
         
         let pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), frac) + side * offset;
         let tx = u32(pos.x + 0.5);

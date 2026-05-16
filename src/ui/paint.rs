@@ -62,10 +62,10 @@ pub fn paint_tick_system(
                 }
             }
         }
-        ActiveTool::Road | ActiveTool::Highway | ActiveTool::Highway2x4 => {
+        ActiveTool::Road | ActiveTool::Highway2x4 | ActiveTool::Highway2x8 => {
             let rtype = match *active {
-                ActiveTool::Highway => RoadType::Highway,
                 ActiveTool::Highway2x4 => RoadType::Highway2x4,
+                ActiveTool::Highway2x8 => RoadType::Highway2x8,
                 _ => RoadType::Normal,
             };
             if matches!(grid.get(x, y), Some(Tile::Empty) | Some(Tile::Zone(_))) {
@@ -86,9 +86,9 @@ pub fn paint_tick_system(
                 for ((tx, ty), seg_id) in tile_to_seg {
                     let rtype = roads.segments[seg_id as usize].road_type;
                     match rtype {
-                        RoadType::Highway2x4 => {
-                            for dx in -2..=3 {
-                                for dy in -2..=3 {
+                        RoadType::Highway2x8 => {
+                            for dx in -4..=5 {
+                                for dy in -4..=5 {
                                     let nx = tx as i32 + dx;
                                     let ny = ty as i32 + dy;
                                     if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {
@@ -97,9 +97,9 @@ pub fn paint_tick_system(
                                 }
                             }
                         }
-                        RoadType::Highway => {
-                            for dx in -1..=2 {
-                                for dy in -1..=2 {
+                        RoadType::Highway2x4 => {
+                            for dx in -2..=3 {
+                                for dy in -2..=3 {
                                     let nx = tx as i32 + dx;
                                     let ny = ty as i32 + dy;
                                     if nx >= 0 && ny >= 0 && (nx as u32) < grid.width && (ny as u32) < grid.height {
@@ -124,8 +124,8 @@ pub fn paint_tick_system(
                     // Materialize adjacent zoned tiles as buildings.
                     // Check a radius large enough for 4x4.
                     let search_radius = match rtype {
+                        RoadType::Highway2x8 => 12,
                         RoadType::Highway2x4 => 8,
-                        RoadType::Highway => 6,
                         RoadType::Normal => 4,
                     };
                     for ox in -search_radius..=search_radius {

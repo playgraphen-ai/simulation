@@ -20,8 +20,8 @@ use bytemuck::{Pod, Zeroable};
 pub enum RoadType {
     #[default]
     Normal,
-    Highway,
     Highway2x4,
+    Highway2x8,
 }
 
 use crate::sim::constants::MAX_SEGMENTS;
@@ -52,7 +52,7 @@ pub struct RoadRow {
     pub conn_b2: f32,
     pub count_b: f32,
     // Texel 4: Extra metadata
-    pub road_type: f32, // 0 for Normal, 1 for Highway, 2 for Highway2x4
+    pub road_type: f32, // 0 for Normal, 1 for Highway2x4, 2 for Highway2x8
     pub major_id: f32,  // ID in the major graph, or -1.0
     pub unused2: f32,
     pub unused3: f32,
@@ -216,8 +216,8 @@ impl RoadData {
                         conn_b: Vec::new(),
                         speed_mean: match rtype {
                             RoadType::Normal => 1.0,
-                            RoadType::Highway => 4.0,
                             RoadType::Highway2x4 => 8.0,
+                            RoadType::Highway2x8 => 16.0,
                         },
                         length,
                         links_offset: 0,
@@ -264,8 +264,8 @@ impl RoadData {
                 conn_b: Vec::new(),
                 speed_mean: match rtype {
                     RoadType::Normal => 1.0,
-                    RoadType::Highway => 4.0,
                     RoadType::Highway2x4 => 8.0,
+                    RoadType::Highway2x8 => 16.0,
                 },
                 length,
                 links_offset: 0,
@@ -323,7 +323,7 @@ impl RoadData {
         self.major_rows.clear();
         let mut original_to_major = std::collections::HashMap::new();
         for (id, seg) in self.segments.iter().enumerate() {
-            if seg.road_type == RoadType::Highway || seg.road_type == RoadType::Highway2x4 {
+            if seg.road_type == RoadType::Highway2x4 || seg.road_type == RoadType::Highway2x8 {
                 let major_id = self.major_rows.len() as u32;
                 original_to_major.insert(id as u32, major_id);
                 self.major_rows.push(MajorRoadRow {
@@ -412,8 +412,8 @@ impl RoadData {
 
             road_type: match seg.road_type {
                 RoadType::Normal => 0.0,
-                RoadType::Highway => 1.0,
-                RoadType::Highway2x4 => 2.0,
+                RoadType::Highway2x4 => 1.0,
+                RoadType::Highway2x8 => 2.0,
             },
             major_id: seg.major_id.map(|m| m as f32).unwrap_or(-1.0),
             ..default()

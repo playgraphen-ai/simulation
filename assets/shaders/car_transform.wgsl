@@ -212,12 +212,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let right = normalize(cross(up, d));
             
             var offset = 0.35;
-            if rtype == 1.0 {
-                let lane = f32(pid % 2u);
-                offset = 0.5 + lane * 1.0;
-            } else if rtype == 2.0 {
+            if rtype == 1.0 { // Highway2x4
                 let lane = f32(pid % 4u);
                 offset = 0.5 + lane * 0.675;
+            } else if rtype == 2.0 { // Highway2x8
+                let lane = f32(pid % 8u);
+                offset = 0.5 + lane * 0.45;
             }
             world_pos = world_pos + right * offset;
 

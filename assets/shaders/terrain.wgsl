@@ -103,18 +103,8 @@ fn fragment(
                     road_color = vec3<f32>(0.8, 0.8, 0.8);
                 }
             }
-        } else if (road_id >= 4 && road_id <= 6) { // Highway (2x2)
+        } else if (road_id >= 4 && road_id <= 6) { // Highway 2x4
             road_color = vec3<f32>(0.15, 0.15, 0.17) + n_detail * 0.05;
-            if (!is_i) {
-                if (dist_across > 1.8 && dist_across < 1.95) {
-                    road_color = vec3<f32>(0.85, 0.85, 0.85); // Ligne de rive
-                }
-                if (dist_across > 0.05 && dist_across < 0.15) {
-                    road_color = vec3<f32>(0.8, 0.6, 0.1); // Double jaune
-                }
-            }
-        } else if (road_id >= 7 && road_id <= 9) { // Highway 2x4
-            road_color = vec3<f32>(0.12, 0.12, 0.14) + n_detail * 0.05;
             if (!is_i) {
                 if (dist_across > 2.8 && dist_across < 2.95) {
                     road_color = vec3<f32>(0.9, 0.9, 0.9); // Ligne de rive
@@ -123,10 +113,29 @@ fn fragment(
                     road_color = vec3<f32>(0.7, 0.6, 0.1); // Terre-plein central
                 }
                 
-                // Marquages des 4 voies par direction
-                let is_lane_marker = abs(dist_across - 0.825) < 0.05 || 
-                                     abs(dist_across - 1.5) < 0.05 || 
-                                     abs(dist_across - 2.175) < 0.05;
+                // Marquages des 4 voies par direction (offset 0.5 + lane * 0.675)
+                let is_lane_marker = abs(dist_across - 0.8375) < 0.05 || 
+                                     abs(dist_across - 1.5125) < 0.05 || 
+                                     abs(dist_across - 2.1875) < 0.05;
+                if (is_lane_marker && dash) {
+                    road_color = vec3<f32>(0.8, 0.8, 0.8);
+                }
+            }
+        } else if (road_id >= 7 && road_id <= 9) { // Highway 2x8
+            road_color = vec3<f32>(0.12, 0.12, 0.14) + n_detail * 0.05;
+            if (!is_i) {
+                if (dist_across > 3.9 && dist_across < 4.05) {
+                    road_color = vec3<f32>(0.95, 0.95, 0.95); // Ligne de rive
+                }
+                if (dist_across < 0.2) {
+                    road_color = vec3<f32>(0.6, 0.5, 0.1); // Terre-plein central large
+                }
+                
+                // Marquages des 8 voies par direction (offset 0.5 + lane * 0.45)
+                // Marqueurs à 0.725, 1.175, 1.625, 2.075, 2.525, 2.975, 3.425
+                let m_dist = dist_across - 0.725;
+                let is_lane_marker = m_dist >= 0.0 && abs(fract(m_dist / 0.45 + 0.5) - 0.5) * 0.45 < 0.05 && dist_across < 3.8;
+                
                 if (is_lane_marker && dash) {
                     road_color = vec3<f32>(0.8, 0.8, 0.8);
                 }

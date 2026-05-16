@@ -253,8 +253,8 @@ fn sync_splat_map_system(
                     let is_v = dy > dx;
                     
                     let radius = match rtype {
+                        RoadType::Highway2x8 => 5,
                         RoadType::Highway2x4 => 3,
-                        RoadType::Highway => 2,
                         RoadType::Normal => 1,
                     };
                     
@@ -265,8 +265,8 @@ fn sync_splat_map_system(
                     let variant = if is_i { 2 } else if is_v { 1 } else { 0 };
                     let base = match rtype {
                         RoadType::Normal => 1,
-                        RoadType::Highway => 4,
-                        RoadType::Highway2x4 => 7,
+                        RoadType::Highway2x4 => 4,
+                        RoadType::Highway2x8 => 7,
                     };
                     
                     data[idx] = base + variant;

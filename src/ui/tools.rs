@@ -10,8 +10,8 @@ pub enum ActiveTool {
     #[default]
     None,
     Road,
-    Highway,
     Highway2x4,
+    Highway2x8,
     Zone(ZoneTag),
 }
 
@@ -128,8 +128,8 @@ pub fn setup_toolbar(mut commands: Commands, durations: Res<ActivityDurations>, 
         )).with_children(|content| {
             label(content, "BUILD");
             tool_button(content, "Road", ActiveTool::Road);
-            tool_button(content, "Highway", ActiveTool::Highway);
             tool_button(content, "Highway 2x4", ActiveTool::Highway2x4);
+            tool_button(content, "Highway 2x8", ActiveTool::Highway2x8);
             tool_button(content, "Zone: Residential", ActiveTool::Zone(ZoneTag::Residential));
             tool_button(content, "Zone: Office", ActiveTool::Zone(ZoneTag::Office));
             tool_button(content, "Zone: Shop", ActiveTool::Zone(ZoneTag::Shop));
