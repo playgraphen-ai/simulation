@@ -44,6 +44,7 @@ impl Plugin for SimPlugin {
 }
 
 use noise::{NoiseFn, OpenSimplex};
+use rayon::prelude::*;
 
 pub fn startup(mut grid: ResMut<grid::CityGrid>) {
     let w = 1280;
@@ -53,39 +54,53 @@ pub fn startup(mut grid: ResMut<grid::CityGrid>) {
     let elev_noise = OpenSimplex::new(42);
     let moist_noise = OpenSimplex::new(1337);
     
-    for y in 0..h {
-        for x in 0..w {
-            let i = grid.idx(x, y);
-            let nx = x as f64 * 0.04;
-            let ny = y as f64 * 0.04;
+    let w_usize = w as usize;
+    let grid_ref = &mut *grid;
+    let biomes = &mut grid_ref.biomes;
+    let tiles = &mut grid_ref.tiles;
+    let elevations = &mut grid_ref.elevations;
+    
+    biomes.par_chunks_mut(w_usize)
+        .zip(tiles.par_chunks_mut(w_usize))
+        .zip(elevations.par_chunks_mut(w_usize))
+        .enumerate()
+        .for_each(|(y, ((biomes_row, tiles_row), elevations_row))| {
+            let y_f = y as f64;
+            let ny = y_f * 0.04;
             
-            // FBM for elevation
-            let e = 1.0 * elev_noise.get([nx, ny]) 
-                  + 0.5 * elev_noise.get([nx * 2.0, ny * 2.0])
-                  + 0.25 * elev_noise.get([nx * 4.0, ny * 4.0]);
-            let e = e / 1.75;
-            
-            // Moisture
-            let m = moist_noise.get([nx * 0.8, ny * 0.8]);
-            
-            if e < -0.2 {
-                grid.biomes[i] = grid::Biome::Water;
-                grid.tiles[i] = grid::Tile::Water;
-                grid.elevations[i] = -0.5; // Flat water
-            } else {
-                let height = ((e + 0.2) * 3.0) as f32; // scale hills
-                grid.elevations[i] = height;
+            for (x, ((biome, tile), elevation)) in biomes_row.iter_mut()
+                .zip(tiles_row.iter_mut())
+                .zip(elevations_row.iter_mut())
+                .enumerate() 
+            {
+                let x_f = x as f64;
+                let nx = x_f * 0.04;
                 
-                if m < -0.2 {
-                    grid.biomes[i] = grid::Biome::Desert;
-                } else if m > 0.3 {
-                    grid.biomes[i] = grid::Biome::Forest;
+                // FBM for elevation
+                let e = (elev_noise.get([nx, ny]) 
+                      + 0.5 * elev_noise.get([nx * 2.0, ny * 2.0])
+                      + 0.25 * elev_noise.get([nx * 4.0, ny * 4.0])) / 1.75;
+                
+                // Moisture
+                let m = moist_noise.get([nx * 0.8, ny * 0.8]);
+                
+                if e < -0.2 {
+                    *biome = grid::Biome::Water;
+                    *tile = grid::Tile::Water;
+                    *elevation = -0.5;
                 } else {
-                    grid.biomes[i] = grid::Biome::Plains;
+                    *elevation = ((e + 0.2) * 3.0) as f32;
+                    
+                    if m < -0.2 {
+                        *biome = grid::Biome::Desert;
+                    } else if m > 0.3 {
+                        *biome = grid::Biome::Forest;
+                    } else {
+                        *biome = grid::Biome::Plains;
+                    }
                 }
             }
-        }
-    }
+        });
 }
 
 /// Unified simulation configuration loaded from assets/sim_schedule.json.
