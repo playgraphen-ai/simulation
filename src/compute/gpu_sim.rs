@@ -820,205 +820,241 @@ fn queue_gpu_sim_bind_group(
 #[derive(Default)]
 struct GpuSimNode;
 
-impl bevy::render::render_graph::Node for GpuSimNode {
-    fn run(
+impl GpuSimNode {
+    fn run_occupancy_gc(
         &self,
-        _graph: &mut RenderGraphContext,
         render_context: &mut RenderContext,
+        bg: &BindGroup,
+        params: &GpuSimParams,
+        gc_clear_pipe: &ComputePipeline,
+        gc_repop_pipe: &ComputePipeline,
+    ) {
+        if params.do_occupancy_gc == 0 {
+            return;
+        }
+
+        let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+            label: Some("gpu_sim_occupancy_gc_pass"),
+            ..default()
+        });
+        pass.set_bind_group(0, bg, &[]);
+        
+        // 1. Clear the entire grid
+        pass.set_pipeline(gc_clear_pipe);
+        let grid_wg_count = (params.grid_w * params.grid_h + 63) / 64;
+        pass.dispatch_workgroups(grid_wg_count, 1, 1);
+
+        // 2. Re-populate with current vehicle positions
+        pass.set_pipeline(gc_repop_pipe);
+        let p_wg_count = (params.people_count + 63) / 64;
+        if p_wg_count > 0 {
+            pass.dispatch_workgroups(p_wg_count, 1, 1);
+        }
+    }
+
+    fn run_recount(
+        &self,
+        render_context: &mut RenderContext,
+        bg: &BindGroup,
+        params: &GpuSimParams,
+        recount_pipe: &ComputePipeline,
+        recalibrate_pipe: &ComputePipeline,
         world: &World,
-    ) -> Result<(), NodeRunError> {
-        let start = std::time::Instant::now();
-        let mut event = crate::TimingEvent::default();
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let gpu_pipeline = world.resource::<GpuSimPipeline>();
-        let bind_group = &world.resource::<GpuSimBindGroup>().0;
-        let params = world.resource::<GpuSimParams>();
-        let textures = world.resource::<GpuSimTextures>();
-        let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
-
-        if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(recalibrate_pipe), Some(gc_clear_pipe), Some(gc_repop_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(car_transform_pipe), Some(bg)) = (
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.buildings_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.recount_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.recalibrate_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_gc_clear_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_gc_repopulate_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.update_roads_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.spawn_pipeline),
-            pipeline_cache.get_compute_pipeline(gpu_pipeline.car_transform_pipeline),
-            bind_group
-        ) {
-            // --- OCCUPANCY GARBAGE COLLECTION ---
-            // Periodically clear and re-populate the occupancy buffer to prevent "ghost cars"
-            if params.do_occupancy_gc > 0 {
-                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("gpu_sim_occupancy_gc_pass"),
-                    ..default()
-                });
-                pass.set_bind_group(0, bg, &[]);
-                
-                // 1. Clear the entire grid
-                pass.set_pipeline(gc_clear_pipe);
-                let grid_wg_count = (params.grid_w * params.grid_h + 63) / 64;
-                pass.dispatch_workgroups(grid_wg_count, 1, 1);
-
-                // 2. Re-populate with current vehicle positions
-                pass.set_pipeline(gc_repop_pipe);
-                let p_wg_count = (params.people_count + 63) / 64;
-                if p_wg_count > 0 {
-                    pass.dispatch_workgroups(p_wg_count, 1, 1);
-                }
-                drop(pass);
-            }
-
-            // Clear recount stats before any logic logic
-            // Only clear the first 60 bytes of stats on the first slice of the recount!
-            // (The rest of the buffer contains lifetime tax accumulators)
-            if params.recount_slice == 0 {
-                // First, recalibrate live counter from previous recount result
-                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("gpu_sim_recalibrate_pass"),
-                    ..default()
-                });
-                pass.set_bind_group(0, bg, &[]);
-                pass.set_pipeline(recalibrate_pipe);
-                pass.dispatch_workgroups(1, 1, 1);
-                drop(pass);
-
-                if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
-                    render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
-                }
-            }
-
-            // --- RECOUNT PASS ---
-            // Recount pass (Sliced over 5 frames, 64 people per thread)
-            let recount_start_time = std::time::Instant::now();
+        event: &mut crate::TimingEvent,
+    ) {
+        // Clear recount stats before any logic logic
+        // Only clear the first 60 bytes of stats on the first slice of the recount!
+        // (The rest of the buffer contains lifetime tax accumulators)
+        if params.recount_slice == 0 {
+            // First, recalibrate live counter from previous recount result
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                label: Some("gpu_sim_recount_pass"),
+                label: Some("gpu_sim_recalibrate_pass"),
                 ..default()
             });
             pass.set_bind_group(0, bg, &[]);
-            pass.set_pipeline(recount_pipe);
-            
-            let slice_count = params.recount_slice_count.max(1);
-            let slice_size = (params.people_count + slice_count - 1) / slice_count;
-            let chunk_size = 64; 
-            let num_threads = (slice_size + chunk_size - 1) / chunk_size;
-            let recount_wg_count = (num_threads + 63) / 64;
-
-            if params.people_count > 0 {
-                pass.dispatch_workgroups(recount_wg_count, 1, 1);
-                event.recount_cycle = Some((params.recount_slice + 1, slice_count));
-            }
+            pass.set_pipeline(recalibrate_pipe);
+            pass.dispatch_workgroups(1, 1, 1);
             drop(pass);
-            event.recount = recount_start_time.elapsed().as_secs_f32() * 1000.0;
 
+            if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
+                render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
+            }
+        }
+
+        // --- RECOUNT PASS ---
+        // Recount pass (Sliced over 5 frames, 64 people per thread)
+        let recount_start_time = std::time::Instant::now();
+        let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+            label: Some("gpu_sim_recount_pass"),
+            ..default()
+        });
+        pass.set_bind_group(0, bg, &[]);
+        pass.set_pipeline(recount_pipe);
+        
+        let slice_count = params.recount_slice_count.max(1);
+        let slice_size = (params.people_count + slice_count - 1) / slice_count;
+        let chunk_size = 64; 
+        let num_threads = (slice_size + chunk_size - 1) / chunk_size;
+        let recount_wg_count = (num_threads + 63) / 64;
+
+        if params.people_count > 0 {
+            pass.dispatch_workgroups(recount_wg_count, 1, 1);
+            event.recount_cycle = Some((params.recount_slice + 1, slice_count));
+        }
+        drop(pass);
+        event.recount = recount_start_time.elapsed().as_secs_f32() * 1000.0;
+    }
+
+    fn run_spawning(
+        &self,
+        render_context: &mut RenderContext,
+        bg: &BindGroup,
+        params: &GpuSimParams,
+        spawn_pipe: &ComputePipeline,
+    ) {
+        if params.spawn_count > 0 {
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                label: Some("gpu_sim_pass"),
+                label: Some("gpu_sim_spawn_pass"),
                 ..default()
             });
             pass.set_bind_group(0, bg, &[]);
-            
-            // 0. Spawning pass
-            if params.spawn_count > 0 {
-                pass.set_pipeline(spawn_pipe);
-                let spawn_wg_count = (params.spawn_count + 63) / 64;
-                pass.dispatch_workgroups(spawn_wg_count, 1, 1);
-            }
+            pass.set_pipeline(spawn_pipe);
+            let spawn_wg_count = (params.spawn_count + 63) / 64;
+            pass.dispatch_workgroups(spawn_wg_count, 1, 1);
+        }
+    }
 
-            let p_wg_count = (params.people_count + 63) / 64;
-
-            // End spawning pass
-            drop(pass);
-
+    fn run_movement(
+        &self,
+        render_context: &mut RenderContext,
+        bg: &BindGroup,
+        params: &GpuSimParams,
+        movement_pipe: &ComputePipeline,
+    ) {
+        let p_wg_count = (params.people_count + 63) / 64;
+        if p_wg_count > 0 {
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                 label: Some("gpu_sim_movement_pass"),
                 ..default()
             });
             pass.set_bind_group(0, bg, &[]);
-
-            // 2. People movement pass (every frame)
             pass.set_pipeline(movement_pipe);
+            pass.dispatch_workgroups(p_wg_count, 1, 1);
+        }
+    }
+
+    fn run_car_transforms(
+        &self,
+        render_context: &mut RenderContext,
+        bg: &BindGroup,
+        params: &GpuSimParams,
+        car_clear_pipe: Option<&ComputePipeline>,
+        car_transform_pipe: &ComputePipeline,
+    ) {
+        if let Some(clear_pipe) = car_clear_pipe {
+            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                label: Some("gpu_sim_car_transform_pass"),
+                ..default()
+            });
+            pass.set_bind_group(0, bg, &[]);
+
+            // First, clear the tail of the transforms texture
+            pass.set_pipeline(clear_pipe);
+            let car_wg_count = (params.car_capacity + 63) / 64;
+            if car_wg_count > 0 {
+                pass.dispatch_workgroups(car_wg_count, 1, 1);
+            }
+
+            // Then, compute and pack active car transforms
+            pass.set_pipeline(car_transform_pipe);
+            let p_wg_count = (params.people_count + 63) / 64;
             if p_wg_count > 0 {
                 pass.dispatch_workgroups(p_wg_count, 1, 1);
             }
-            drop(pass);
-
-            // 2b. Car clear/transform pass (every frame)
-            if let Some(car_clear_pipe) = pipeline_cache.get_compute_pipeline(gpu_pipeline.car_clear_pipeline) {
-                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("gpu_sim_car_transform_pass"),
-                    ..default()
-                });
-                pass.set_bind_group(0, bg, &[]);
-
-                // First, clear the tail of the transforms texture
-                pass.set_pipeline(car_clear_pipe);
-                let car_wg_count = (params.car_capacity + 63) / 64;
-                if car_wg_count > 0 {
-                    pass.dispatch_workgroups(car_wg_count, 1, 1);
-                }
-
-                // Then, compute and pack active car transforms
-                pass.set_pipeline(car_transform_pipe);
-                if p_wg_count > 0 {
-                    pass.dispatch_workgroups(p_wg_count, 1, 1);
-                }
-                drop(pass);
-            }
-
-            // 3. People logic pass
-            if params.logic_count > 0 {
-                let logic_start_time = std::time::Instant::now();
-                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("gpu_sim_logic_pass"),
-                    ..default()
-                });
-                pass.set_bind_group(0, bg, &[]);
-                pass.set_pipeline(logic_pipe);
-                let logic_wg_count = (params.logic_count + 63) / 64;
-                pass.dispatch_workgroups(logic_wg_count, 1, 1);
-                drop(pass);
-                event.logic = logic_start_time.elapsed().as_secs_f32() * 1000.0;
-                event.logic_count = Some(params.logic_count);
-                event.logic_cycle = Some((params.logic_start / params.logic_count.max(1) + 1, (params.people_count + params.logic_count.max(1) - 1) / params.logic_count.max(1)));
-            }
-
-            // 5. Buildings pass (Updates textures from Recount results)
-            if params.b_count > 0 {
-                let bldg_start_time = std::time::Instant::now();
-                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("gpu_sim_buildings_pass"),
-                    ..default()
-                });
-                pass.set_bind_group(0, bg, &[]);
-                pass.set_pipeline(build_pipe);
-                let b_wg_count = (params.b_count + 63) / 64;
-                pass.dispatch_workgroups(b_wg_count, 1, 1);
-                drop(pass);
-                event.bldg = bldg_start_time.elapsed().as_secs_f32() * 1000.0;
-                event.bldg_cycle = Some((params.b_start / params.b_count.max(1) + 1, (params.buildings_count + params.b_count.max(1) - 1) / params.b_count.max(1)));
-            }
-
-            // 6. Update Roads pass
-            if params.r_count > 0 {
-                let road_start_time = std::time::Instant::now();
-                let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
-                    label: Some("gpu_sim_roads_pass"),
-                    ..default()
-                });
-                pass.set_bind_group(0, bg, &[]);
-                pass.set_pipeline(update_roads_pipe);
-                let r_wg_count = (params.r_count + 63) / 64;
-                pass.dispatch_workgroups(r_wg_count, 1, 1);
-                drop(pass);
-                event.road = road_start_time.elapsed().as_secs_f32() * 1000.0;
-                event.road_cycle = Some((params.r_start / params.r_count.max(1) + 1, (params.segments_count + params.r_count.max(1) - 1) / params.r_count.max(1)));
-            }
         }
+    }
 
+    fn run_logic(
+        &self,
+        render_context: &mut RenderContext,
+        bg: &BindGroup,
+        params: &GpuSimParams,
+        logic_pipe: &ComputePipeline,
+        event: &mut crate::TimingEvent,
+    ) {
+        if params.logic_count > 0 {
+            let logic_start_time = std::time::Instant::now();
+            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                label: Some("gpu_sim_logic_pass"),
+                ..default()
+            });
+            pass.set_bind_group(0, bg, &[]);
+            pass.set_pipeline(logic_pipe);
+            let logic_wg_count = (params.logic_count + 63) / 64;
+            pass.dispatch_workgroups(logic_wg_count, 1, 1);
+            drop(pass);
+            event.logic = logic_start_time.elapsed().as_secs_f32() * 1000.0;
+            event.logic_count = Some(params.logic_count);
+            event.logic_cycle = Some((params.logic_start / params.logic_count.max(1) + 1, (params.people_count + params.logic_count.max(1) - 1) / params.logic_count.max(1)));
+        }
+    }
+
+    fn run_buildings(
+        &self,
+        render_context: &mut RenderContext,
+        bg: &BindGroup,
+        params: &GpuSimParams,
+        build_pipe: &ComputePipeline,
+        event: &mut crate::TimingEvent,
+    ) {
+        if params.b_count > 0 {
+            let bldg_start_time = std::time::Instant::now();
+            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                label: Some("gpu_sim_buildings_pass"),
+                ..default()
+            });
+            pass.set_bind_group(0, bg, &[]);
+            pass.set_pipeline(build_pipe);
+            let b_wg_count = (params.b_count + 63) / 64;
+            pass.dispatch_workgroups(b_wg_count, 1, 1);
+            drop(pass);
+            event.bldg = bldg_start_time.elapsed().as_secs_f32() * 1000.0;
+            event.bldg_cycle = Some((params.b_start / params.b_count.max(1) + 1, (params.buildings_count + params.b_count.max(1) - 1) / params.b_count.max(1)));
+        }
+    }
+
+    fn run_roads(
+        &self,
+        render_context: &mut RenderContext,
+        bg: &BindGroup,
+        params: &GpuSimParams,
+        update_roads_pipe: &ComputePipeline,
+        event: &mut crate::TimingEvent,
+    ) {
+        if params.r_count > 0 {
+            let road_start_time = std::time::Instant::now();
+            let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
+                label: Some("gpu_sim_roads_pass"),
+                ..default()
+            });
+            pass.set_bind_group(0, bg, &[]);
+            pass.set_pipeline(update_roads_pipe);
+            let r_wg_count = (params.r_count + 63) / 64;
+            pass.dispatch_workgroups(r_wg_count, 1, 1);
+            drop(pass);
+            event.road = road_start_time.elapsed().as_secs_f32() * 1000.0;
+            event.road_cycle = Some((params.r_start / params.r_count.max(1) + 1, (params.segments_count + params.r_count.max(1) - 1) / params.r_count.max(1)));
+        }
+    }
+
+    fn run_readbacks(
+        &self,
+        render_context: &mut RenderContext,
+        params: &GpuSimParams,
+        textures: &GpuSimTextures,
+        world: &World,
+        gpu_images: &bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>,
+    ) {
         // Copy Stats
         if params.do_stats_readback > 0 {
             let readback_handles = world.resource::<GpuReadbackBufferHandles>();
@@ -1098,6 +1134,58 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                  last_copy.0.store(selection.changed_frame, Ordering::Relaxed);
             }
         }
+    }
+}
+
+impl bevy::render::render_graph::Node for GpuSimNode {
+    fn run(
+        &self,
+        _graph: &mut RenderGraphContext,
+        render_context: &mut RenderContext,
+        world: &World,
+    ) -> Result<(), NodeRunError> {
+        let start = std::time::Instant::now();
+        let mut event = crate::TimingEvent::default();
+        let pipeline_cache = world.resource::<PipelineCache>();
+        let gpu_pipeline = world.resource::<GpuSimPipeline>();
+        let bind_group = &world.resource::<GpuSimBindGroup>().0;
+        let params = world.resource::<GpuSimParams>();
+        let textures = world.resource::<GpuSimTextures>();
+        let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
+
+        if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(recalibrate_pipe), Some(gc_clear_pipe), Some(gc_repop_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(car_transform_pipe), Some(bg)) = (
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.logic_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.buildings_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.recount_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.recalibrate_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_gc_clear_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.occupancy_gc_repopulate_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.update_roads_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.spawn_pipeline),
+            pipeline_cache.get_compute_pipeline(gpu_pipeline.car_transform_pipeline),
+            bind_group
+        ) {
+            self.run_occupancy_gc(render_context, bg, params, gc_clear_pipe, gc_repop_pipe);
+            
+            self.run_recount(render_context, bg, params, recount_pipe, recalibrate_pipe, world, &mut event);
+
+            self.run_spawning(render_context, bg, params, spawn_pipe);
+
+            self.run_movement(render_context, bg, params, movement_pipe);
+
+            let car_clear_pipe = pipeline_cache.get_compute_pipeline(gpu_pipeline.car_clear_pipeline);
+            self.run_car_transforms(render_context, bg, params, car_clear_pipe, car_transform_pipe);
+
+            self.run_logic(render_context, bg, params, logic_pipe, &mut event);
+
+            self.run_buildings(render_context, bg, params, build_pipe, &mut event);
+
+            self.run_roads(render_context, bg, params, update_roads_pipe, &mut event);
+        }
+
+        self.run_readbacks(render_context, params, textures, world, gpu_images);
 
         if let Ok(tx) = world.resource::<crate::TimingsSender>().0.lock() {
             event.total_compute = start.elapsed().as_secs_f32() * 1000.0;
