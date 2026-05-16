@@ -9,7 +9,6 @@ pub mod gpu_sim;
 pub mod gpu_pathfinding;
 
 use bevy::prelude::*;
-use serde::{Deserialize, Serialize};
 
 use crate::sim::textures::{create_data_textures, DataTextures};
 use crate::sim::{
