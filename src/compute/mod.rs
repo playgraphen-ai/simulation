@@ -9,6 +9,7 @@ pub mod gpu_sim;
 pub mod gpu_pathfinding;
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::sim::textures::{create_data_textures, DataTextures};
 use crate::sim::{
@@ -293,13 +294,6 @@ fn sync_gpu_textures_and_params(
         gpu_params.reset_stats = 1;
     } else {
         gpu_params.reset_stats = 0;
-    }
-
-    // Reset building stats at the start of the full simulation cycle (frame 0)
-    if state.schedule.current_frame == 0 {
-        gpu_params.reset_building_stats = 1;
-    } else {
-        gpu_params.reset_building_stats = 0;
     }
 
     // Readback only at the end of the recount cycle, AND only once every ~60 frames to save performance
