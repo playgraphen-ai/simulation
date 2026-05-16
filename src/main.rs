@@ -59,63 +59,129 @@ pub struct TimingsSender(pub Mutex<Sender<TimingEvent>>);
 #[derive(Resource)]
 pub struct TimingsReceiver(pub Mutex<Receiver<TimingEvent>>);
 
-#[derive(Resource, Default, Clone)]
-pub struct DetailedTimings {
-    pub frame_start: Option<Instant>,
-    pub update_start: Option<Instant>,
-    
-    pub last_update_ms: f32,
-    pub last_compute_ms: f32,
-    pub last_render_ms: f32,
-    
-    pub last_logic_ms: f32,
-    pub last_bldg_ms: f32,
-    pub last_road_ms: f32,
-    pub last_pathfind_ms: f32,
-    pub last_recount_ms: f32,
-    
-    // Smoothed values for UI
-    pub smooth_update_ms: f32,
-    pub smooth_compute_ms: f32,
-    pub smooth_render_ms: f32,
-    
-    pub smooth_logic_ms: f32,
-    pub smooth_bldg_ms: f32,
-    pub smooth_road_ms: f32,
-    pub smooth_pathfind_ms: f32,
-    pub smooth_recount_ms: f32,
+macro_rules! define_detailed_timings {
+    (
+        metrics: { $($m_event:ident => $m_last:ident, $m_smooth:ident $(, $m_peak:ident)? ;)* },
+        render: { $r_event:ident => $r_last:ident, $r_smooth:ident }
+    ) => {
+        #[derive(Resource, Default, Clone)]
+        pub struct DetailedTimings {
+            pub frame_start: Option<Instant>,
+            pub update_start: Option<Instant>,
+            pub last_update_ms: f32,
+            pub smooth_update_ms: f32,
+            
+            pub $r_last: f32,
+            pub $r_smooth: f32,
 
-    pub peak_logic_ms: f32,
-    pub peak_bldg_ms: f32,
-    pub peak_road_ms: f32,
-    pub peak_pathfind_ms: f32,
-    pub peak_recount_ms: f32,
-    
-    // Cycle progress
-    pub recount_cycle: Option<(u32, u32)>,
-    pub logic_cycle: (u32, u32),
-    pub bldg_cycle: (u32, u32),
-    pub road_cycle: (u32, u32),
+            $(
+                pub $m_last: f32,
+                pub $m_smooth: f32,
+                $( pub $m_peak: f32, )?
+            )*
 
-    // Data Readback latencies
-    pub rb_stats_ms: f32,
-    pub rb_person_ms: f32,
-    pub rb_bldg_ms: f32,
+            pub recount_cycle: Option<(u32, u32)>,
+            pub logic_cycle: (u32, u32),
+            pub bldg_cycle: (u32, u32),
+            pub road_cycle: (u32, u32),
 
-    // Throughput (items / ms)
-    pub throughput_logic: f32,
-    pub throughput_path: f32,
+            pub rb_stats_ms: f32,
+            pub rb_person_ms: f32,
+            pub rb_bldg_ms: f32,
 
-    // Buffer Occupancy %
-    pub occ_people: f32,
-    pub occ_buildings: f32,
-    pub occ_segments: f32,
+            pub throughput_logic: f32,
+            pub throughput_path: f32,
 
-    pub acc_update_ms: f32,
-    pub acc_compute_ms: f32,
-    pub acc_render_ms: f32,
-    pub acc_frames: u32,
+            pub occ_people: f32,
+            pub occ_buildings: f32,
+            pub occ_segments: f32,
+
+            pub acc_update_ms: f32,
+            pub acc_compute_ms: f32,
+            pub acc_render_ms: f32,
+            pub acc_frames: u32,
+        }
+
+        impl DetailedTimings {
+            fn reset_frame(&mut self) {
+                self.$r_last = 0.0;
+                $( self.$m_last = 0.0; )*
+            }
+
+            fn receive_event(&mut self, event: &TimingEvent) {
+                if event.$r_event > 0.0 { self.$r_last += event.$r_event; }
+                $(
+                    if event.$m_event > 0.0 {
+                        self.$m_last += event.$m_event;
+                    }
+                )*
+
+                if let Some(cycle) = event.recount_cycle { self.recount_cycle = Some(cycle); }
+                if let Some(cycle) = event.logic_cycle { self.logic_cycle = cycle; }
+                if let Some(cycle) = event.bldg_cycle { self.bldg_cycle = cycle; }
+                if let Some(cycle) = event.road_cycle { self.road_cycle = cycle; }
+
+                if let Some(ms) = event.rb_stats_ms { self.rb_stats_ms = ms; }
+                if let Some(ms) = event.rb_person_ms { self.rb_person_ms = ms; }
+                if let Some(ms) = event.rb_bldg_ms { self.rb_bldg_ms = ms; }
+
+                if let Some(count) = event.logic_count { 
+                    if event.logic > 0.0 {
+                        let alpha = 0.1;
+                        let throughput = count as f32 / event.logic;
+                        self.throughput_logic = self.throughput_logic * (1.0 - alpha) + throughput * alpha;
+                    }
+                }
+                if let Some(count) = event.path_count {
+                    if event.pathfind > 0.0 {
+                        let alpha = 0.1;
+                        let throughput = count as f32 / event.pathfind;
+                        self.throughput_path = self.throughput_path * (1.0 - alpha) + throughput * alpha;
+                    }
+                }
+
+                if let Some((occ, cap)) = event.occ_people {
+                    if cap > 0 { self.occ_people = (occ as f32 / cap as f32) * 100.0; }
+                }
+                if let Some((occ, cap)) = event.occ_bldgs {
+                    if cap > 0 { self.occ_buildings = (occ as f32 / cap as f32) * 100.0; }
+                }
+                if let Some((occ, cap)) = event.occ_segments {
+                    if cap > 0 { self.occ_segments = (occ as f32 / cap as f32) * 100.0; }
+                }
+            }
+
+            fn apply_smoothing(&mut self) {
+                let alpha = 0.1;
+                self.$r_smooth = self.$r_smooth * (1.0 - alpha) + self.$r_last * alpha;
+                $(
+                    if self.$m_last > 0.0 {
+                        self.$m_smooth = self.$m_smooth * (1.0 - alpha) + self.$m_last * alpha;
+                        $(
+                            if self.$m_last > self.$m_peak {
+                                self.$m_peak = self.$m_last;
+                            }
+                        )?
+                    }
+                )*
+                self.acc_compute_ms += self.last_compute_ms;
+                self.acc_render_ms += self.last_render_ms;
+            }
+        }
+    };
 }
+
+define_detailed_timings!(
+    metrics: {
+        total_compute => last_compute_ms, smooth_compute_ms;
+        logic => last_logic_ms, smooth_logic_ms, peak_logic_ms;
+        bldg => last_bldg_ms, smooth_bldg_ms, peak_bldg_ms;
+        road => last_road_ms, smooth_road_ms, peak_road_ms;
+        pathfind => last_pathfind_ms, smooth_pathfind_ms, peak_pathfind_ms;
+        recount => last_recount_ms, smooth_recount_ms, peak_recount_ms;
+    },
+    render: { render => last_render_ms, smooth_render_ms }
+);
 
 fn main() {
     // Backend: DX12 is the only one that works on this ARM64 + Adreno box.
@@ -222,14 +288,7 @@ fn start_timing(mut timings: ResMut<DetailedTimings>) {
     let now = Instant::now();
     timings.frame_start = Some(now);
     timings.update_start = Some(now);
-    // Reset frame-local timings
-    timings.last_compute_ms = 0.0;
-    timings.last_render_ms = 0.0;
-    timings.last_logic_ms = 0.0;
-    timings.last_bldg_ms = 0.0;
-    timings.last_road_ms = 0.0;
-    timings.last_pathfind_ms = 0.0;
-    timings.last_recount_ms = 0.0;
+    timings.reset_frame();
 }
 
 fn receive_timings(
@@ -238,91 +297,9 @@ fn receive_timings(
 ) {
     if let Ok(rx) = receiver.0.lock() {
         while let Ok(event) = rx.try_recv() {
-            if event.total_compute > 0.0 { timings.last_compute_ms += event.total_compute; }
-            if event.logic > 0.0 { timings.last_logic_ms += event.logic; }
-            if event.bldg > 0.0 { timings.last_bldg_ms += event.bldg; }
-            if event.road > 0.0 { timings.last_road_ms += event.road; }
-            if event.pathfind > 0.0 { timings.last_pathfind_ms += event.pathfind; }
-            if event.recount > 0.0 { timings.last_recount_ms += event.recount; }
-            if event.render > 0.0 { timings.last_render_ms += event.render; }
-
-            if let Some(cycle) = event.recount_cycle { timings.recount_cycle = Some(cycle); }
-            if let Some(cycle) = event.logic_cycle { timings.logic_cycle = cycle; }
-            if let Some(cycle) = event.bldg_cycle { timings.bldg_cycle = cycle; }
-            if let Some(cycle) = event.road_cycle { timings.road_cycle = cycle; }
-
-            if let Some(ms) = event.rb_stats_ms { timings.rb_stats_ms = ms; }
-            if let Some(ms) = event.rb_person_ms { timings.rb_person_ms = ms; }
-            if let Some(ms) = event.rb_bldg_ms { timings.rb_bldg_ms = ms; }
-
-            if let Some(count) = event.logic_count { 
-                if event.logic > 0.0 {
-                    let alpha = 0.1;
-                    let throughput = count as f32 / event.logic;
-                    timings.throughput_logic = timings.throughput_logic * (1.0 - alpha) + throughput * alpha;
-                }
-            }
-            if let Some(count) = event.path_count {
-                if event.pathfind > 0.0 {
-                    let alpha = 0.1;
-                    let throughput = count as f32 / event.pathfind;
-                    timings.throughput_path = timings.throughput_path * (1.0 - alpha) + throughput * alpha;
-                }
-            }
-
-            if let Some((occ, cap)) = event.occ_people {
-                if cap > 0 { timings.occ_people = (occ as f32 / cap as f32) * 100.0; }
-            }
-            if let Some((occ, cap)) = event.occ_bldgs {
-                if cap > 0 { timings.occ_buildings = (occ as f32 / cap as f32) * 100.0; }
-            }
-            if let Some((occ, cap)) = event.occ_segments {
-                if cap > 0 { timings.occ_segments = (occ as f32 / cap as f32) * 100.0; }
-            }
+            timings.receive_event(&event);
         }
-        
-        // Apply smoothing (EWMA)
-        let alpha = 0.1;
-        // Only smooth if there's actually a non-zero value this frame, 
-        // to avoid decaying to 0 during frames where a slice doesn't run.
-        if timings.last_compute_ms > 0.0 {
-            timings.smooth_compute_ms = timings.smooth_compute_ms * (1.0 - alpha) + timings.last_compute_ms * alpha;
-        }
-        if timings.last_logic_ms > 0.0 {
-            timings.smooth_logic_ms = timings.smooth_logic_ms * (1.0 - alpha) + timings.last_logic_ms * alpha;
-            if timings.last_logic_ms > timings.peak_logic_ms {
-                timings.peak_logic_ms = timings.last_logic_ms;
-            }
-        }
-        if timings.last_bldg_ms > 0.0 {
-            timings.smooth_bldg_ms = timings.smooth_bldg_ms * (1.0 - alpha) + timings.last_bldg_ms * alpha;
-            if timings.last_bldg_ms > timings.peak_bldg_ms {
-                timings.peak_bldg_ms = timings.last_bldg_ms;
-            }
-        }
-        if timings.last_road_ms > 0.0 {
-            timings.smooth_road_ms = timings.smooth_road_ms * (1.0 - alpha) + timings.last_road_ms * alpha;
-            if timings.last_road_ms > timings.peak_road_ms {
-                timings.peak_road_ms = timings.last_road_ms;
-            }
-        }
-        if timings.last_pathfind_ms > 0.0 {
-            timings.smooth_pathfind_ms = timings.smooth_pathfind_ms * (1.0 - alpha) + timings.last_pathfind_ms * alpha;
-            if timings.last_pathfind_ms > timings.peak_pathfind_ms {
-                timings.peak_pathfind_ms = timings.last_pathfind_ms;
-            }
-        }
-        if timings.last_recount_ms > 0.0 {
-            timings.smooth_recount_ms = timings.smooth_recount_ms * (1.0 - alpha) + timings.last_recount_ms * alpha;
-            if timings.last_recount_ms > timings.peak_recount_ms {
-                timings.peak_recount_ms = timings.last_recount_ms;
-            }
-        }
-        
-        timings.smooth_render_ms = timings.smooth_render_ms * (1.0 - alpha) + timings.last_render_ms * alpha;
-
-        timings.acc_compute_ms += timings.last_compute_ms;
-        timings.acc_render_ms += timings.last_render_ms;
+        timings.apply_smoothing();
     }
 }
 
