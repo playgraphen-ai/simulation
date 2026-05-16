@@ -20,39 +20,13 @@ pub struct SimCounters {
     pub tax_income_total: u32,
     pub tax_rent_total: u32,
     pub tax_consumption_total: u32,
-    pub money_total: u32,
 }
 
 pub fn update_counters_system(
     roads: Res<RoadData>,
-    buildings: Res<crate::sim::buildings::BuildingData>,
     mut counters: ResMut<SimCounters>,
 ) {
-    if !roads.is_changed() && !buildings.is_changed() { return; }
+    if !roads.is_changed() { return; }
     
     counters.road_segments = roads.segments.len() as u32;
-    
-    let mut res = 0;
-    let mut off = 0;
-    let mut shop = 0;
-
-    for b in &buildings.items {
-        if b.capacity > 0 {
-            match b.btype {
-                crate::sim::grid::ZoneType::Residential => {
-                    res += 1;
-                }
-                crate::sim::grid::ZoneType::Office => {
-                    off += 1;
-                }
-                crate::sim::grid::ZoneType::Shop => {
-                    shop += 1;
-                }
-            }
-        }
-    }
-
-    counters.residential = res;
-    counters.offices = off;
-    counters.shops = shop;
 }

@@ -292,6 +292,7 @@ pub struct GpuSimParams {
     pub cycle_frames: u32,
     pub do_stats_readback: u32,
     pub reset_stats: u32,
+    pub reset_building_stats: u32,
     pub grid_w: u32,
     pub grid_h: u32,
     pub entry_seg: u32,
@@ -343,6 +344,7 @@ impl Default for GpuSimParams {
             cycle_frames: 90,
             do_stats_readback: 0,
             reset_stats: 0,
+            reset_building_stats: 0,
             grid_w: 128,
             grid_h: 128,
             entry_seg: 0,
@@ -876,7 +878,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
             // Clear recount stats before any logic logic
             // Only clear the first 60 bytes of stats on the first slice of the recount!
             // (The rest of the buffer contains lifetime tax accumulators)
-            if params.recount_slice == 0 {
+            if params.recount_slice == 0 || params.reset_building_stats != 0 {
                 // First, recalibrate live counter from previous recount result
                 let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                     label: Some("gpu_sim_recalibrate_pass"),
@@ -887,8 +889,10 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(1, 1, 1);
                 drop(pass);
 
-                if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
-                    render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
+                if params.recount_slice == 0 {
+                    if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
+                        render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
+                    }
                 }
             }
 
@@ -1135,10 +1139,12 @@ fn request_gpu_readback(
                         counters.res_occupants = stats.home_count;
                         counters.office_occupants = stats.work_count;
                         counters.shop_occupants = stats.shop_count;
+                        counters.residential = stats.residential_count;
+                        counters.offices = stats.office_count;
+                        counters.shops = stats.shop_count_b;
                         counters.tax_income_total = stats.tax_income_total;
                         counters.tax_rent_total = stats.tax_rent_total;
                         counters.tax_consumption_total = stats.tax_consumption_total;
-                        counters.money_total = stats.total_money;
                     }
                 });
             *last_readback_frame = params.recount_slice;

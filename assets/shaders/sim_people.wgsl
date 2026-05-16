@@ -31,6 +31,7 @@ struct SimParams {
     cycle_frames: u32,
     do_stats_readback: u32,
     reset_stats: u32,
+    reset_building_stats: u32,
     grid_w: u32,
     grid_h: u32,
     entry_seg: u32,
@@ -529,12 +530,15 @@ fn main_recalibrate_stats() {
         atomicStore(&stats.residential_occupancy, 0u);
         atomicStore(&stats.office_occupancy, 0u);
         atomicStore(&stats.shop_occupancy, 0u);
-        atomicStore(&stats.residential_count, 0u);
-        atomicStore(&stats.office_count, 0u);
-        atomicStore(&stats.shop_count_b, 0u);
         atomicStore(&stats.residential_assigned, 0u);
         atomicStore(&stats.office_assigned, 0u);
         atomicStore(&stats.bankrupt_count, 0u);
+    }
+
+    if params.reset_building_stats != 0u {
+        atomicStore(&stats.residential_count, 0u);
+        atomicStore(&stats.office_count, 0u);
+        atomicStore(&stats.shop_count_b, 0u);
     }
 }
 
@@ -834,6 +838,10 @@ fn main_buildings(@builtin(global_invocation_id) gid: vec3<u32>) {
     var age_seconds = tex2.y;
 
     if capacity == 0.0 { return; }
+
+    if btype == 0.0 { atomicAdd(&stats.residential_count, 1u); }
+    else if btype == 1.0 { atomicAdd(&stats.office_count, 1u); }
+    else if btype == 2.0 { atomicAdd(&stats.shop_count_b, 1u); }
 
     let logic_dt = params.dt * f32(params.cycle_frames);
     age_seconds = age_seconds + logic_dt;
