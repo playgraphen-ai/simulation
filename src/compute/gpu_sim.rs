@@ -124,7 +124,7 @@ use std::borrow::Cow;
 
 use crate::sim::people::PeopleData;
 use crate::sim::buildings::BuildingData;
-use crate::sim::{ActivityDurations, SimSettings};
+use crate::sim::{SimConfig, SimSettings};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Default, Pod, Zeroable, ShaderType)]
@@ -1203,7 +1203,7 @@ fn request_gpu_readback(
 
 pub fn update_gpu_sim_params(
     time: &Time,
-    durations: &ActivityDurations,
+    config: &SimConfig,
     settings: &SimSettings,
     people: &PeopleData,
     buildings: &BuildingData,
@@ -1214,10 +1214,10 @@ pub fn update_gpu_sim_params(
     car_capacity: u32,
 ) {
     gpu_params.dt = time.delta_secs();
-    gpu_params.home_duration = durations.home;
-    gpu_params.work_duration = durations.work;
-    gpu_params.shop_duration = durations.shop;
-    gpu_params.home_to_work_prob = durations.home_to_work_prob;
+    gpu_params.home_duration = config.home;
+    gpu_params.work_duration = config.work;
+    gpu_params.shop_duration = config.shop;
+    gpu_params.home_to_work_prob = config.home_to_work_prob;
     gpu_params.people_count = people.len;
     gpu_params.people_tex_w = people.tex_width;
     gpu_params.people_tex_h = people.tex_height;

@@ -138,8 +138,15 @@ fn main() {
     let (tx, rx) = std::sync::mpsc::channel();
 
     let mut app = App::new();
+
+    let config = crate::sim::SimConfig::load();
+    let settings = crate::sim::SimSettings::new(&config);
+    let schedule = crate::compute::SimScheduleState::new(config);
     
-    app.insert_resource(ClearColor(Color::srgb(0.15, 0.35, 0.15)))
+    app.insert_resource(config)
+        .insert_resource(settings)
+        .insert_resource(schedule)
+        .insert_resource(ClearColor(Color::srgb(0.15, 0.35, 0.15)))
         .init_resource::<DetailedTimings>()
         .insert_resource(TimingsReceiver(Mutex::new(rx)))
         .add_plugins(DefaultPlugins

@@ -28,7 +28,7 @@ impl Plugin for SimPlugin {
             .init_resource::<roads::RoadData>()
             .init_resource::<buildings::BuildingData>()
             .init_resource::<counters::SimCounters>()
-            .init_resource::<ActivityDurations>()
+            .init_resource::<SimConfig>()
             .init_resource::<SimSettings>()
             .init_resource::<GameTime>()
             .init_resource::<crate::compute::spawn::PendingGpuSpawns>()
@@ -88,6 +88,58 @@ pub fn startup(mut grid: ResMut<grid::CityGrid>) {
     }
 }
 
+/// Unified simulation configuration loaded from assets/sim_schedule.json.
+#[derive(Resource, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct SimConfig {
+    // Scheduling parameters (previously in ScheduleConfig)
+    pub gc_frames: u32,
+    pub buildings_frames: u32,
+    pub people_logic_frames: u32,
+    pub roads_frames: u32,
+    pub pathfind_frames: u32,
+    pub stats_frames: u32,
+
+    // Activity durations and economic parameters (previously in ActivityDurations)
+    pub home: f32,
+    pub work: f32,
+    pub shop: f32,
+    /// Probability 0..1 of going to work (vs. shopping) after home.
+    pub home_to_work_prob: f32,
+    pub tax_income: f32,
+    pub tax_rent: f32,
+    pub tax_consumption: f32,
+}
+
+impl SimConfig {
+    pub fn load() -> Self {
+        // Try to load from assets/sim_schedule.json
+        std::fs::read_to_string("assets/sim_schedule.json")
+            .ok()
+            .and_then(|s| serde_json::from_str::<SimConfig>(&s).ok())
+            .unwrap_or_default()
+    }
+}
+
+impl Default for SimConfig {
+    fn default() -> Self {
+        Self {
+            gc_frames: 1,
+            buildings_frames: 10,
+            people_logic_frames: 10,
+            roads_frames: 10,
+            pathfind_frames: 59,
+            stats_frames: 1,
+            home: 150.0,
+            work: 225.0,
+            shop: 75.0,
+            home_to_work_prob: 0.6,
+            tax_income: 0.15,
+            tax_rent: 0.1,
+            tax_consumption: 0.08,
+        }
+    }
+}
+
 /// Global settings that the user can tweak via sliders.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct SimSettings {
@@ -101,52 +153,24 @@ pub struct SimSettings {
     pub collisions_enabled: f32, // 1.0 for true, 0.0 for false
 }
 
-impl Default for SimSettings {
-    fn default() -> Self {
-        let dur = ActivityDurations::default();
+impl SimSettings {
+    pub fn new(config: &SimConfig) -> Self {
         Self {
             abandon_multiplier: 1.0,
             rent_cost: 20.0,
             work_salary: 50.0,
             shop_cost: 30.0,
-            tax_income: dur.tax_income,
-            tax_rent: dur.tax_rent,
-            tax_consumption: dur.tax_consumption,
+            tax_income: config.tax_income,
+            tax_rent: config.tax_rent,
+            tax_consumption: config.tax_consumption,
             collisions_enabled: 1.0,
         }
     }
 }
 
-/// How long each activity lasts on the CPU side, in seconds. Changes here are
-/// not applied retroactively to in-progress activities — the compute shader
-/// reads this resource only when a person transitions to a new activity.
-#[derive(Resource, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct ActivityDurations {
-    pub home: f32,
-    pub work: f32,
-    pub shop: f32,
-    /// Probability 0..1 of going to work (vs. shopping) after home.
-    pub home_to_work_prob: f32,
-    pub tax_income: f32,
-    pub tax_rent: f32,
-    pub tax_consumption: f32,
-}
-
-impl Default for ActivityDurations {
+impl Default for SimSettings {
     fn default() -> Self {
-        // Try to load from assets/sim_schedule.json
-        std::fs::read_to_string("assets/sim_schedule.json")
-            .ok()
-            .and_then(|s| serde_json::from_str::<ActivityDurations>(&s).ok())
-            .unwrap_or(Self { 
-                home: 150.0, 
-                work: 225.0, 
-                shop: 75.0, 
-                home_to_work_prob: 0.6,
-                tax_income: 0.15,
-                tax_rent: 0.1,
-                tax_consumption: 0.08,
-            })
+        Self::new(&SimConfig::default())
     }
 }
 

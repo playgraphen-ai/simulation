@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 
 use crate::sim::grid::ZoneType;
-use crate::sim::{ActivityDurations, SimSettings, SpawnPeopleRequest};
+use crate::sim::{SimConfig, SimSettings, SpawnPeopleRequest};
 
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveTool {
@@ -67,7 +67,7 @@ pub struct SliderFill(pub SliderKind);
 #[derive(Component)]
 pub struct SliderValueText(pub SliderKind);
 
-pub fn setup_toolbar(mut commands: Commands, durations: Res<ActivityDurations>, settings: Res<SimSettings>) {
+pub fn setup_toolbar(mut commands: Commands, config: Res<SimConfig>, settings: Res<SimSettings>) {
     // Root panel, right-hand side.
     commands.spawn((
         Node {
@@ -152,10 +152,10 @@ pub fn setup_toolbar(mut commands: Commands, durations: Res<ActivityDurations>, 
 
             label(content, "ACTIVITIES (s)");
 
-            slider_row(content, "Home", SliderKind::HomeDuration, 0.0, 300.0, durations.home);
-            slider_row(content, "Work", SliderKind::WorkDuration, 0.0, 300.0, durations.work);
-            slider_row(content, "Shop", SliderKind::ShopDuration, 0.0, 300.0, durations.shop);
-            slider_row(content, "P(home→work)", SliderKind::HomeToWorkProb, 0.0, 1.0, durations.home_to_work_prob);
+            slider_row(content, "Home", SliderKind::HomeDuration, 0.0, 300.0, config.home);
+            slider_row(content, "Work", SliderKind::WorkDuration, 0.0, 300.0, config.work);
+            slider_row(content, "Shop", SliderKind::ShopDuration, 0.0, 300.0, config.shop);
+            slider_row(content, "P(home→work)", SliderKind::HomeToWorkProb, 0.0, 1.0, config.home_to_work_prob);
         });
     });
 }
@@ -341,7 +341,7 @@ pub fn handle_spawn_button(
 /// and the underlying resource value.
 pub fn handle_sliders(
     mouse: Res<ButtonInput<MouseButton>>,
-    mut durations: ResMut<ActivityDurations>,
+    mut config: ResMut<SimConfig>,
     mut settings: ResMut<SimSettings>,
     mut tracks: Query<(&Interaction, &bevy::ui::RelativeCursorPosition, &SliderKind, &SliderRange)>,
     mut fills: Query<(&SliderFill, &mut Node)>,
@@ -354,10 +354,10 @@ pub fn handle_sliders(
             let ratio = pos.x.clamp(0.0, 1.0);
             let value = range.min + (range.max - range.min) * ratio;
             match kind {
-                SliderKind::HomeDuration => durations.home = value,
-                SliderKind::WorkDuration => durations.work = value,
-                SliderKind::ShopDuration => durations.shop = value,
-                SliderKind::HomeToWorkProb => durations.home_to_work_prob = value.clamp(0., 1.),
+                SliderKind::HomeDuration => config.home = value,
+                SliderKind::WorkDuration => config.work = value,
+                SliderKind::ShopDuration => config.shop = value,
+                SliderKind::HomeToWorkProb => config.home_to_work_prob = value.clamp(0., 1.),
                 SliderKind::AbandonMultiplier => settings.abandon_multiplier = value,
                 SliderKind::RentCost => settings.rent_cost = value,
                 SliderKind::WorkSalary => settings.work_salary = value,

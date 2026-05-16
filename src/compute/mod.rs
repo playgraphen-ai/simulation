@@ -16,43 +16,29 @@ use crate::sim::{
     buildings::BuildingData,
     people::PeopleData,
     roads::RoadData,
-    ActivityDurations,
+    SimConfig,
     SimSettings,
 };
 use crate::AppState;
 
-#[derive(Serialize, Deserialize, Clone, Resource)]
-pub struct ScheduleConfig {
-    pub gc_frames: u32,
-    pub buildings_frames: u32,
-    pub people_logic_frames: u32,
-    pub roads_frames: u32,
-    pub pathfind_frames: u32,
-    pub stats_frames: u32,
-}
-
-impl Default for ScheduleConfig {
-    fn default() -> Self {
-        Self { gc_frames: 1, buildings_frames: 10, people_logic_frames: 10, roads_frames: 10, pathfind_frames: 59, stats_frames: 1 }
-    }
-}
-
 #[derive(Resource)]
 pub struct SimScheduleState {
-    pub config: ScheduleConfig,
+    pub config: SimConfig,
     pub current_frame: u32,
     pub cycle_frames: u32,
     pub recount_frame: u32,
 }
 
-impl Default for SimScheduleState {
-    fn default() -> Self {
-        let config: ScheduleConfig = std::fs::read_to_string("assets/sim_schedule.json")
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default();
+impl SimScheduleState {
+    pub fn new(config: SimConfig) -> Self {
         let cycle_frames = config.gc_frames + config.buildings_frames + config.people_logic_frames + config.roads_frames + config.pathfind_frames + config.stats_frames;
         Self { config, current_frame: 0, cycle_frames, recount_frame: 0 }
+    }
+}
+
+impl Default for SimScheduleState {
+    fn default() -> Self {
+        Self::new(SimConfig::default())
     }
 }
 
@@ -177,7 +163,7 @@ use bevy::ecs::system::SystemParam;
 #[derive(SystemParam)]
 struct SimStateParams<'w> {
     time: Res<'w, Time>,
-    durations: Res<'w, ActivityDurations>,
+    config: Res<'w, SimConfig>,
     settings: Res<'w, SimSettings>,
     people: Res<'w, PeopleData>,
     buildings: Res<'w, BuildingData>,
@@ -210,7 +196,7 @@ fn sync_gpu_textures_and_params(
     let entry_seg = scenario.as_ref().map(|s| s.entry_seg).unwrap_or(0);
     gpu_sim::update_gpu_sim_params(
         &state.time, 
-        &state.durations, 
+        &state.config, 
         &state.settings, 
         &state.people, 
         &state.buildings, 
