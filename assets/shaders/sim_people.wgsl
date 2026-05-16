@@ -519,6 +519,22 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
 fn main_recalibrate_stats() {
     if params.recount_slice == 0u {
         atomicStore(&stats.live_car_count, atomicLoad(&stats.travelling_count));
+        
+        atomicStore(&stats.people_count, 0u);
+        atomicStore(&stats.home_count, 0u);
+        atomicStore(&stats.work_count, 0u);
+        atomicStore(&stats.shop_count, 0u);
+        atomicStore(&stats.travelling_count, 0u);
+        atomicStore(&stats.total_money, 0u);
+        atomicStore(&stats.residential_occupancy, 0u);
+        atomicStore(&stats.office_occupancy, 0u);
+        atomicStore(&stats.shop_occupancy, 0u);
+        atomicStore(&stats.residential_count, 0u);
+        atomicStore(&stats.office_count, 0u);
+        atomicStore(&stats.shop_count_b, 0u);
+        atomicStore(&stats.residential_assigned, 0u);
+        atomicStore(&stats.office_assigned, 0u);
+        atomicStore(&stats.bankrupt_count, 0u);
     }
 }
 

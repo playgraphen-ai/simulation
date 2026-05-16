@@ -90,6 +90,9 @@ fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
 @compute @workgroup_size(64)
 fn main_clear(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
+    if idx == 0u {
+        atomicStore(&stats.active_car_count, 0u);
+    }
     if idx >= params.car_capacity { return; }
 
     let t_w = 1024u;

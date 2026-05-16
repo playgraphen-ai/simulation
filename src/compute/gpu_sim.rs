@@ -121,8 +121,6 @@ pub fn apply_texture_updates(
 
 use bytemuck::{Pod, Zeroable};
 use std::borrow::Cow;
-use std::sync::Mutex;
-use std::sync::mpsc::{Receiver, Sender};
 
 use crate::sim::people::PeopleData;
 use crate::sim::buildings::BuildingData;
@@ -153,76 +151,15 @@ pub struct GpuStats {
     pub live_car_count: u32,
 }
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
-
-#[derive(Resource, Default)]
-pub struct GpuReadbackBuffer {
-    pub inspector_p_buf: Option<Buffer>,
-    pub inspector_b_buf: Option<Buffer>,
-    pub stats_buffer: Option<Buffer>,
-    pub p_mapped: Arc<AtomicBool>,
-    pub b_mapped: Arc<AtomicBool>,
-    pub s_mapped: Arc<AtomicBool>,
-    pub last_copy_frame: Arc<AtomicU32>,
-    pub last_map_frame: u32,
-}
+use std::sync::atomic::{AtomicU32, Ordering};
 
 #[derive(Resource, Default)]
 struct GpuOccupancyBuffer(Option<Buffer>);
-
-fn prepare_readback_buffers(
-    render_device: Res<RenderDevice>,
-    mut readback: ResMut<GpuReadbackBuffer>,
-) {
-    if readback.inspector_p_buf.is_none() {
-        readback.inspector_p_buf = Some(render_device.create_buffer(&BufferDescriptor {
-            label: Some("inspector_p_buf"),
-            size: 256,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        }));
-    }
-    if readback.inspector_b_buf.is_none() {
-        readback.inspector_b_buf = Some(render_device.create_buffer(&BufferDescriptor {
-            label: Some("inspector_b_buf"),
-            size: 256,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        }));
-    }
-    if readback.stats_buffer.is_none() {
-        readback.stats_buffer = Some(render_device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_stats_readback_buffer"),
-            size: std::mem::size_of::<GpuStats>() as u64,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        }));
-    }
-}
 
 pub struct GpuSimPlugin;
 
 #[derive(RenderLabel, Debug, Clone, Hash, PartialEq, Eq)]
 pub struct GpuSimLabel;
-
-#[derive(Resource)]
-pub struct PeopleReceiver(pub Mutex<Receiver<Vec<(u32, crate::sim::people::PersonRow)>>>);
-
-#[derive(Resource)]
-pub struct BuildingsReceiver(pub Mutex<Receiver<Vec<(u32, crate::sim::buildings::BuildingRow)>>>);
-
-#[derive(Resource)]
-pub struct PeopleSender(pub Mutex<Sender<Vec<(u32, crate::sim::people::PersonRow)>>>);
-
-#[derive(Resource)]
-pub struct BuildingsSender(pub Mutex<Sender<Vec<(u32, crate::sim::buildings::BuildingRow)>>>);
-
-#[derive(Resource)]
-pub struct StatsSender(pub Mutex<Sender<GpuStats>>);
-
-#[derive(Resource)]
-pub struct StatsReceiver(pub Mutex<Receiver<GpuStats>>);
 
 #[derive(Resource)]
 struct GpuSimShader(Handle<Shader>);
@@ -236,23 +173,44 @@ struct GpuSpawnShader(Handle<Shader>);
 #[derive(Resource, Default)]
 struct GpuStatsBuffer(Option<Buffer>);
 
+#[derive(Resource, Clone, ExtractResource)]
+pub struct GpuReadbackBufferHandles {
+    pub inspector_p_buf: Handle<bevy::render::storage::ShaderStorageBuffer>,
+    pub inspector_b_buf: Handle<bevy::render::storage::ShaderStorageBuffer>,
+    pub stats_buffer: Handle<bevy::render::storage::ShaderStorageBuffer>,
+}
+
 impl Plugin for GpuSimPlugin {
     fn build(&self, app: &mut App) {
         let shader = app.world_mut().resource::<AssetServer>().load("shaders/sim_people.wgsl");
         let update_roads_shader = app.world_mut().resource::<AssetServer>().load("shaders/update_roads.wgsl");
         let spawn_shader = app.world_mut().resource::<AssetServer>().load("shaders/spawn_people.wgsl");
         let car_transform_shader = app.world_mut().resource::<AssetServer>().load("shaders/car_transform.wgsl");
-        let (tx_p, rx_p) = std::sync::mpsc::channel();
-        let (tx_b, rx_b) = std::sync::mpsc::channel();
-        let (tx_s, rx_s) = std::sync::mpsc::channel();
+
+        app.add_systems(Update, request_gpu_readback);
+
+        let mut buffers = app.world_mut().resource_mut::<Assets<bevy::render::storage::ShaderStorageBuffer>>();
         
-        app.insert_resource(PeopleReceiver(Mutex::new(rx_p)));
-        app.insert_resource(BuildingsReceiver(Mutex::new(rx_b)));
-        app.insert_resource(StatsReceiver(Mutex::new(rx_s)));
+        let mut p_buf = bevy::render::storage::ShaderStorageBuffer::from(vec![0u32; 64]);
+        p_buf.buffer_description.usage |= bevy::render::render_resource::BufferUsages::COPY_DST | bevy::render::render_resource::BufferUsages::COPY_SRC;
+        
+        let mut b_buf = bevy::render::storage::ShaderStorageBuffer::from(vec![0u32; 64]);
+        b_buf.buffer_description.usage |= bevy::render::render_resource::BufferUsages::COPY_DST | bevy::render::render_resource::BufferUsages::COPY_SRC;
+        
+        let mut s_buf = bevy::render::storage::ShaderStorageBuffer::from(vec![0u32; std::mem::size_of::<GpuStats>() / 4 + 1]);
+        s_buf.buffer_description.usage |= bevy::render::render_resource::BufferUsages::COPY_DST | bevy::render::render_resource::BufferUsages::COPY_SRC;
+
+        let handles = GpuReadbackBufferHandles {
+            inspector_p_buf: buffers.add(p_buf),
+            inspector_b_buf: buffers.add(b_buf),
+            stats_buffer: buffers.add(s_buf),
+        };
+        app.insert_resource(handles);
 
         app.add_plugins(ExtractResourcePlugin::<GpuSimParams>::default())
            .add_plugins(ExtractResourcePlugin::<GpuSimTextures>::default())
-           .add_plugins(ExtractResourcePlugin::<ExtractedTextureUpdates>::default());
+           .add_plugins(ExtractResourcePlugin::<ExtractedTextureUpdates>::default())
+           .add_plugins(ExtractResourcePlugin::<GpuReadbackBufferHandles>::default());
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
@@ -260,23 +218,18 @@ impl Plugin for GpuSimPlugin {
             .insert_resource(GpuUpdateRoadsShader(update_roads_shader))
             .insert_resource(GpuSpawnShader(spawn_shader))
             .insert_resource(GpuCarTransformShader(car_transform_shader))
-            .insert_resource(PeopleSender(Mutex::new(tx_p)))
-            .insert_resource(BuildingsSender(Mutex::new(tx_b)))
-            .insert_resource(StatsSender(Mutex::new(tx_s)))
-            .init_resource::<GpuReadbackBuffer>()
             .init_resource::<GpuSimBindGroup>()
             .init_resource::<GpuSimUniformBuffer>()
             .init_resource::<GpuCongestionBuffer>()
             .init_resource::<GpuStatsBuffer>()
             .init_resource::<GpuOccupancyBuffer>()
             .init_resource::<GpuBuildingStatsBuffer>()
+            .init_resource::<GpuLastCopyFrame>()
             .add_systems(Render, (
                 apply_texture_updates,
                 prepare_gpu_sim_buffers,
-                prepare_readback_buffers,
             ).in_set(bevy::render::RenderSystems::Prepare))
-            .add_systems(Render, queue_gpu_sim_bind_group.in_set(bevy::render::RenderSystems::Queue))
-            .add_systems(Render, map_and_send_readback.in_set(bevy::render::RenderSystems::Cleanup));
+            .add_systems(Render, queue_gpu_sim_bind_group.in_set(bevy::render::RenderSystems::Queue));
 
         let mut graph = render_app.world_mut().resource_mut::<bevy::render::render_graph::RenderGraph>();
         graph.add_node(GpuSimLabel, GpuSimNode::default());
@@ -288,6 +241,9 @@ impl Plugin for GpuSimPlugin {
         render_app.init_resource::<GpuSimPipeline>();
     }
 }
+
+#[derive(Resource, Default)]
+struct GpuLastCopyFrame(AtomicU32);
 
 #[derive(Resource, Clone, ExtractResource, Default)]
 pub struct GpuSimTextures {
@@ -802,10 +758,10 @@ fn queue_gpu_sim_bind_group(
     textures: Res<GpuSimTextures>,
     buffer: Res<GpuSimUniformBuffer>,
     congestion: Res<GpuCongestionBuffer>,
-    stats: Res<GpuStatsBuffer>,
     occupancy: Res<GpuOccupancyBuffer>,
     b_stats: Res<GpuBuildingStatsBuffer>,
     path_buffers: Res<crate::compute::gpu_pathfinding::GpuPathBuffers>,
+    stats: Res<GpuStatsBuffer>,
     mut bind_group: ResMut<GpuSimBindGroup>,
 ) {
     let (
@@ -879,7 +835,6 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         let params = world.resource::<GpuSimParams>();
         let textures = world.resource::<GpuSimTextures>();
         let gpu_images = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>();
-        let readback = world.resource::<GpuReadbackBuffer>();
 
         if let (Some(movement_pipe), Some(_occupancy_pipe), Some(logic_pipe), Some(build_pipe), Some(recount_pipe), Some(recalibrate_pipe), Some(gc_clear_pipe), Some(gc_repop_pipe), Some(update_roads_pipe), Some(spawn_pipe), Some(car_transform_pipe), Some(bg)) = (
             pipeline_cache.get_compute_pipeline(gpu_pipeline.people_pipeline),
@@ -918,12 +873,6 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 drop(pass);
             }
 
-            // --- CLEAR PASS ---
-            // Clear active_car_count every frame. Offset 60, size 4.
-            if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
-                render_context.command_encoder().clear_buffer(stats_buf, 60, Some(4));
-            }
-
             // Clear recount stats before any logic logic
             // Only clear the first 60 bytes of stats on the first slice of the recount!
             // (The rest of the buffer contains lifetime tax accumulators)
@@ -938,12 +887,6 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                 pass.dispatch_workgroups(1, 1, 1);
                 drop(pass);
 
-                if let Some(stats_buf) = world.resource::<GpuStatsBuffer>().0.as_ref() {
-                    render_context.command_encoder().clear_buffer(stats_buf, 0, Some(60));
-                }
-            }
-
-            if params.recount_slice == 0 {
                 if let Some(b_stats_buf) = world.resource::<GpuBuildingStatsBuffer>().0.as_ref() {
                     render_context.command_encoder().clear_buffer(b_stats_buf, 0, None);
                 }
@@ -1077,21 +1020,28 @@ impl bevy::render::render_graph::Node for GpuSimNode {
         }
 
         // Copy Stats
-        if params.do_stats_readback > 0 && !readback.s_mapped.load(Ordering::Relaxed) {
-            if let (Some(stats_buf), Some(rb_stats_buf)) = (world.resource::<GpuStatsBuffer>().0.as_ref(), readback.stats_buffer.as_ref()) {
+        if params.do_stats_readback > 0 {
+            let readback_handles = world.resource::<GpuReadbackBufferHandles>();
+            let storage_buffers = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::storage::GpuShaderStorageBuffer>>();
+            
+            if let (Some(stats_buf), Some(rb_stats_buf)) = (world.resource::<GpuStatsBuffer>().0.as_ref(), storage_buffers.get(readback_handles.stats_buffer.id())) {
                 let size = std::mem::size_of::<GpuStats>() as u64;
-                render_context.command_encoder().copy_buffer_to_buffer(stats_buf, 0, rb_stats_buf, 0, size);
+                render_context.command_encoder().copy_buffer_to_buffer(stats_buf, 0, &rb_stats_buf.buffer, 0, size);
             }
         }
 
         // Selective Readbacks
         if let Some(selection) = world.get_resource::<crate::ui::inspector::Selection>() {
-            let changed = selection.changed_frame != readback.last_copy_frame.load(Ordering::Relaxed);
+            let last_copy = world.resource::<GpuLastCopyFrame>();
+            let changed = selection.changed_frame != last_copy.0.load(Ordering::Relaxed);
             
-            match selection.obj {
-                Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
-                    if params.do_inspector_readback > 0 && !readback.p_mapped.load(Ordering::Relaxed) {
-                        if let (Some(people_h), Some(p_buf)) = (textures.people.as_ref(), readback.inspector_p_buf.as_ref()) {
+            if params.do_inspector_readback > 0 {
+                let readback_handles = world.resource::<GpuReadbackBufferHandles>();
+                let storage_buffers = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::storage::GpuShaderStorageBuffer>>();
+
+                match selection.obj {
+                    Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
+                        if let (Some(people_h), Some(p_buf)) = (textures.people.as_ref(), storage_buffers.get(readback_handles.inspector_p_buf.id())) {
                             if let Some(gpu_img) = gpu_images.get(people_h) {
                                 let texel_idx = pid * 3;
                                 let x = texel_idx % params.people_tex_w;
@@ -1101,7 +1051,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                                 render_context.command_encoder().copy_texture_to_buffer(
                                     tex_info,
                                     TexelCopyBufferInfo {
-                                        buffer: p_buf,
+                                        buffer: &p_buf.buffer,
                                         layout: TexelCopyBufferLayout {
                                             offset: 0,
                                             bytes_per_row: Some(256),
@@ -1110,14 +1060,12 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                                     },
                                     Extent3d { width: 3, height: 1, depth_or_array_layers: 1 },
                                 );
-                                readback.last_copy_frame.store(selection.changed_frame, Ordering::Relaxed);
+                                last_copy.0.store(selection.changed_frame, Ordering::Relaxed);
                             }
                         }
                     }
-                }
-                Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
-                    if params.do_inspector_readback > 0 && !readback.b_mapped.load(Ordering::Relaxed) {
-                        if let (Some(buildings_h), Some(b_buf)) = (textures.buildings.as_ref(), readback.inspector_b_buf.as_ref()) {
+                    Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
+                        if let (Some(buildings_h), Some(b_buf)) = (textures.buildings.as_ref(), storage_buffers.get(readback_handles.inspector_b_buf.id())) {
                             if let Some(gpu_img) = gpu_images.get(buildings_h) {
                                 let texel_idx = bid * 3;
                                 let x = texel_idx % params.buildings_tex_w;
@@ -1127,7 +1075,7 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                                 render_context.command_encoder().copy_texture_to_buffer(
                                     tex_info,
                                     TexelCopyBufferInfo {
-                                        buffer: b_buf,
+                                        buffer: &b_buf.buffer,
                                         layout: TexelCopyBufferLayout {
                                             offset: 0,
                                             bytes_per_row: Some(256),
@@ -1136,16 +1084,18 @@ impl bevy::render::render_graph::Node for GpuSimNode {
                                     },
                                     Extent3d { width: 3, height: 1, depth_or_array_layers: 1 },
                                 );
-                                readback.last_copy_frame.store(selection.changed_frame, Ordering::Relaxed);
+                                last_copy.0.store(selection.changed_frame, Ordering::Relaxed);
                             }
                         }
                     }
-                }
-                _ => {
-                    if changed {
-                        readback.last_copy_frame.store(selection.changed_frame, Ordering::Relaxed);
+                    _ => {
+                        if changed {
+                            last_copy.0.store(selection.changed_frame, Ordering::Relaxed);
+                        }
                     }
                 }
+            } else if changed {
+                 last_copy.0.store(selection.changed_frame, Ordering::Relaxed);
             }
         }
 
@@ -1164,187 +1114,89 @@ impl bevy::render::render_graph::Node for GpuSimNode {
     }
 }
 
-fn map_and_send_readback(
-    _render_device: Res<RenderDevice>,
-    mut readback: ResMut<GpuReadbackBuffer>,
-    sender_p: Res<PeopleSender>,
-    sender_b: Res<BuildingsSender>,
-    sender_s: Res<StatsSender>,
-    timings_sender: Res<crate::TimingsSender>,
+fn request_gpu_readback(
+    mut commands: Commands,
     params: Res<GpuSimParams>,
     selection: Option<Res<crate::ui::inspector::Selection>>,
+    mut last_copy_frame: Local<u32>,
+    readback_buffers: Res<GpuReadbackBufferHandles>,
+    mut last_readback_frame: Local<u32>,
 ) {
-    // Stats Readback
-    if params.do_stats_readback > 0 && !readback.s_mapped.load(Ordering::Relaxed) {
-        if let Some(s_buf) = readback.stats_buffer.as_ref() {
-            readback.s_mapped.store(true, Ordering::Relaxed);
-            let tx_s = sender_s.0.lock().unwrap().clone();
-            let tx_t = timings_sender.0.lock().unwrap().clone();
-            let s_clone = s_buf.clone();
-            let s_mapped_flag = readback.s_mapped.clone();
-            let start = std::time::Instant::now();
-            s_buf.slice(..).map_async(MapMode::Read, move |res| {
-                if res.is_ok() {
-                    let data = s_clone.slice(..).get_mapped_range();
-                    let stats: GpuStats = *bytemuck::from_bytes(&data);
-                    drop(data);
-                    s_clone.unmap();
-                    let _ = tx_s.send(stats);
-                    
-                    // Send timing
-                    let mut event = crate::TimingEvent::default();
-                    event.rb_stats_ms = Some(start.elapsed().as_secs_f32() * 1000.0);
-                    let _ = tx_t.send(event);
-                }
-                s_mapped_flag.store(false, Ordering::Relaxed);
-            });
+    if params.do_stats_readback > 0 {
+        if *last_readback_frame != params.recount_slice {
+            commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.stats_buffer.clone()))
+                .observe(|trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut counters: ResMut<crate::sim::counters::SimCounters>| {
+                    let data = &trigger.event().data;
+                    if data.len() >= std::mem::size_of::<GpuStats>() {
+                        let stats: GpuStats = *bytemuck::from_bytes(&data[..std::mem::size_of::<GpuStats>()]);
+                        counters.people = stats.people_count;
+                        counters.cars = stats.live_car_count;
+                        counters.bankrupt = stats.bankrupt_count;
+                        counters.res_occupants = stats.home_count;
+                        counters.office_occupants = stats.work_count;
+                        counters.shop_occupants = stats.shop_count;
+                        counters.tax_income_total = stats.tax_income_total;
+                        counters.tax_rent_total = stats.tax_rent_total;
+                        counters.tax_consumption_total = stats.tax_consumption_total;
+                        counters.money_total = stats.total_money;
+                    }
+                });
+            *last_readback_frame = params.recount_slice;
         }
+    } else {
+        *last_readback_frame = params.recount_slice;
     }
 
     if let Some(sel) = selection {
-        let changed = sel.changed_frame != readback.last_map_frame;
-
-        match sel.obj {
-            Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
-                if !readback.p_mapped.load(Ordering::Relaxed) && readback.last_copy_frame.load(Ordering::Relaxed) == sel.changed_frame {
-                    if let Some(p_buf) = readback.inspector_p_buf.as_ref() {
-                        readback.p_mapped.store(true, Ordering::Relaxed);
-                        let tx_p = sender_p.0.lock().unwrap().clone();
-                        let tx_t = timings_sender.0.lock().unwrap().clone();
-                        let p_clone = p_buf.clone();
-                        let p_mapped_flag = readback.p_mapped.clone();
-                        let start = std::time::Instant::now();
-                        p_buf.slice(..).map_async(MapMode::Read, move |res_p| {
-                            if res_p.is_ok() {
-                                let data_p = p_clone.slice(..).get_mapped_range();
-                                if data_p.len() >= std::mem::size_of::<crate::sim::people::PersonRow>() {
-                                    let row: crate::sim::people::PersonRow = *bytemuck::from_bytes(&data_p[..std::mem::size_of::<crate::sim::people::PersonRow>()]);
-                                    drop(data_p);
-                                    p_clone.unmap();
-                                    let _ = tx_p.send(vec![(pid, row)]);
-                                    
-                                    let mut event = crate::TimingEvent::default();
-                                    event.rb_person_ms = Some(start.elapsed().as_secs_f32() * 1000.0);
-                                    let _ = tx_t.send(event);
-                                } else {
-                                    drop(data_p);
-                                    p_clone.unmap();
+        let changed = sel.changed_frame != *last_copy_frame;
+        if changed && params.do_inspector_readback > 0 {
+            match sel.obj {
+                Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
+                    commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.inspector_p_buf.clone()))
+                        .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut people: ResMut<crate::sim::people::PeopleData>| {
+                            let data = &trigger.event().data;
+                            if data.len() >= std::mem::size_of::<crate::sim::people::PersonRow>() {
+                                let row: crate::sim::people::PersonRow = *bytemuck::from_bytes(&data[..std::mem::size_of::<crate::sim::people::PersonRow>()]);
+                                if (pid as usize) < people.rows.len() {
+                                    people.rows[pid as usize] = row;
                                 }
                             }
-                            p_mapped_flag.store(false, Ordering::Relaxed);
                         });
-                        if changed {
-                            readback.last_map_frame = sel.changed_frame;
-                        }
-                    }
                 }
-            }
-            Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
-                if !readback.b_mapped.load(Ordering::Relaxed) && readback.last_copy_frame.load(Ordering::Relaxed) == sel.changed_frame {
-                    if let Some(b_buf) = readback.inspector_b_buf.as_ref() {
-                        readback.b_mapped.store(true, Ordering::Relaxed);
-                        let tx_b = sender_b.0.lock().unwrap().clone();
-                        let tx_t = timings_sender.0.lock().unwrap().clone();
-                        let b_clone = b_buf.clone();
-                        let b_mapped_flag = readback.b_mapped.clone();
-                        let start = std::time::Instant::now();
-                        b_buf.slice(..).map_async(MapMode::Read, move |res_b| {
-                            if res_b.is_ok() {
-                                let data_b = b_clone.slice(..).get_mapped_range();
-                                if data_b.len() >= std::mem::size_of::<crate::sim::buildings::BuildingRow>() {
-                                    let row: crate::sim::buildings::BuildingRow = *bytemuck::from_bytes(&data_b[..std::mem::size_of::<crate::sim::buildings::BuildingRow>()]);
-                                    drop(data_b);
-                                    b_clone.unmap();
-                                    let _ = tx_b.send(vec![(bid, row)]);
+                Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
+                    commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.inspector_b_buf.clone()))
+                        .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut buildings: ResMut<BuildingData>, mut grid: ResMut<crate::sim::grid::CityGrid>, mut counters: ResMut<crate::sim::counters::SimCounters>| {
+                            let data = &trigger.event().data;
+                            if data.len() >= std::mem::size_of::<crate::sim::buildings::BuildingRow>() {
+                                let r: crate::sim::buildings::BuildingRow = *bytemuck::from_bytes(&data[..std::mem::size_of::<crate::sim::buildings::BuildingRow>()]);
+                                if let Some(b) = buildings.items.get_mut(bid as usize) {
+                                    b.occupants = r.occupants as u32;
+                                    b.assigned = r.assigned as u32;
+                                    b.growth = r.growth;
+                                    b.age_seconds = r.age_seconds;
                                     
-                                    let mut event = crate::TimingEvent::default();
-                                    event.rb_bldg_ms = Some(start.elapsed().as_secs_f32() * 1000.0);
-                                    let _ = tx_t.send(event);
-                                } else {
-                                    drop(data_b);
-                                    b_clone.unmap();
+                                    if b.level != r.level as u32 {
+                                        b.level = r.level as u32;
+                                        b.capacity = r.capacity as u32;
+                                        b.income = r.income;
+                                    }
+                                    
+                                    if b.capacity > 0 && r.capacity <= 0.0 {
+                                        b.capacity = 0;
+                                        if let Some(crate::sim::grid::Tile::Building(current_bid)) = grid.get(b.tile.0, b.tile.1) {
+                                            if current_bid == bid {
+                                                grid.set(b.tile.0, b.tile.1, crate::sim::grid::Tile::Zone(b.btype));
+                                                counters.destroyed_buildings += 1;
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                            b_mapped_flag.store(false, Ordering::Relaxed);
                         });
-                        if changed {
-                            readback.last_map_frame = sel.changed_frame;
-                        }
-                    }
                 }
+                _ => {}
             }
-            _ => {
-                if changed {
-                    readback.last_map_frame = sel.changed_frame;
-                }
-            }
-        }
-    }
-}
-
-pub fn apply_gpu_readback(
-    rx_p: Res<PeopleReceiver>,
-    rx_b: Res<BuildingsReceiver>,
-    rx_s: Res<StatsReceiver>,
-    mut people: ResMut<PeopleData>,
-    mut buildings: ResMut<BuildingData>,
-    mut grid: ResMut<crate::sim::grid::CityGrid>,
-    mut counters: ResMut<crate::sim::counters::SimCounters>,
-) {
-    if let Ok(rx) = rx_s.0.lock() {
-        while let Ok(stats) = rx.try_recv() {
-            // Because of the 5-frame slice, intermediate or cleared stats might be read back.
-            // If the recount says 0 people but we have people in the simulation, it's a partial state.
-            if stats.people_count > 0 || people.len == 0 {
-                counters.people = stats.people_count;
-                counters.cars = stats.live_car_count;
-                counters.bankrupt = stats.bankrupt_count;
-                counters.res_occupants = stats.home_count;
-                counters.office_occupants = stats.work_count;
-                counters.shop_occupants = stats.shop_count;
-                counters.tax_income_total = stats.tax_income_total;
-                counters.tax_rent_total = stats.tax_rent_total;
-                counters.tax_consumption_total = stats.tax_consumption_total;
-                counters.money_total = stats.total_money;
-            }
-        }
-    }
-
-    if let Ok(rx) = rx_p.0.lock() {
-        while let Ok(p_rows) = rx.try_recv() {
-            for (id, row) in p_rows {
-                if (id as usize) < people.rows.len() {
-                    people.rows[id as usize] = row;
-                }
-            }
-        }
-    }
-    if let Ok(rx) = rx_b.0.lock() {
-        while let Ok(b_rows) = rx.try_recv() {
-            for (id, r) in b_rows {
-                if let Some(b) = buildings.items.get_mut(id as usize) {
-                    b.occupants = r.occupants as u32;
-                    b.assigned = r.assigned as u32;
-                    b.growth = r.growth;
-                    b.age_seconds = r.age_seconds;
-                    
-                    if b.level != r.level as u32 {
-                        b.level = r.level as u32;
-                        b.capacity = r.capacity as u32;
-                        b.income = r.income;
-                    }
-                    
-                    if b.capacity > 0 && r.capacity <= 0.0 {
-                        b.capacity = 0;
-                        if let Some(crate::sim::grid::Tile::Building(current_bid)) = grid.get(b.tile.0, b.tile.1) {
-                            if current_bid == id {
-                                grid.set(b.tile.0, b.tile.1, crate::sim::grid::Tile::Zone(b.btype));
-                                counters.destroyed_buildings += 1;
-                            }
-                        }
-                    }
-                }
-            }
+            *last_copy_frame = sel.changed_frame;
         }
     }
 }

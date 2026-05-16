@@ -10,8 +10,6 @@ use bevy::{
 };
 use bytemuck::{Pod, Zeroable};
 use std::borrow::Cow;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use crate::compute::gpu_sim::GpuSimTextures;
 
 pub struct GpuPickingPlugin;
@@ -33,39 +31,29 @@ pub struct PickingParams {
 #[derive(Resource)]
 struct GpuPickingShader(Handle<Shader>);
 
-pub fn process_pick_result(
-    receiver: Res<PickReceiver>,
-    mut picked: ResMut<PickedCar>,
-) {
-    if let Ok(rx) = receiver.0.lock() {
-        while let Ok(id) = rx.try_recv() {
-            picked.0 = id;
-        }
-    }
-}
-
 impl Plugin for GpuPickingPlugin {
     fn build(&self, app: &mut App) {
         let shader = app.world_mut().resource::<AssetServer>().load("shaders/picking.wgsl");
         app.init_resource::<PickingParams>();
         app.init_resource::<PickedCar>();
         
-        let (tx, rx) = std::sync::mpsc::channel();
-        app.insert_resource(PickSender(std::sync::Mutex::new(tx.clone())));
-        app.insert_resource(PickReceiver(std::sync::Mutex::new(rx)));
+        let mut buffers = app.world_mut().resource_mut::<Assets<bevy::render::storage::ShaderStorageBuffer>>();
+        let mut buffer = bevy::render::storage::ShaderStorageBuffer::from(vec![0u32; 2]);
+        buffer.buffer_description.usage |= bevy::render::render_resource::BufferUsages::COPY_DST | bevy::render::render_resource::BufferUsages::COPY_SRC;
+        let handle = buffers.add(buffer);
+        app.insert_resource(PickingResultBufferHandle(handle.clone()));
         
         app.add_plugins(ExtractResourcePlugin::<PickingParams>::default());
+        app.add_plugins(ExtractResourcePlugin::<PickingResultBufferHandle>::default());
 
-        app.add_systems(Update, (update_picking_ray, process_pick_result));
+        app.add_systems(Update, (update_picking_ray, request_picking_readback));
 
         let render_app = app.sub_app_mut(RenderApp);
         render_app
             .insert_resource(GpuPickingShader(shader))
-            .insert_resource(PickSender(std::sync::Mutex::new(tx)))
             .init_resource::<GpuPickingBuffers>()
             .add_systems(Render, prepare_picking_buffers.in_set(bevy::render::RenderSystems::Prepare))
-            .add_systems(Render, queue_picking_bind_group.in_set(bevy::render::RenderSystems::Queue))
-            .add_systems(Render, readback_picking_result.in_set(bevy::render::RenderSystems::Cleanup));
+            .add_systems(Render, queue_picking_bind_group.in_set(bevy::render::RenderSystems::Queue));
 
         let mut graph = render_app.world_mut().resource_mut::<bevy::render::render_graph::RenderGraph>();
         graph.add_node(GpuPickingLabel, GpuPickingNode::default());
@@ -78,6 +66,33 @@ impl Plugin for GpuPickingPlugin {
         render_app.init_resource::<GpuPickingPipeline>();
     }
 }
+
+fn request_picking_readback(
+    mut commands: Commands,
+    params: Res<PickingParams>,
+    picking_res: Option<Res<PickingResultBufferHandle>>,
+    mut last_active: Local<u32>,
+) {
+    if params.is_active > 0 && *last_active == 0 {
+        if let Some(res_buf) = picking_res {
+            commands.spawn(bevy::render::gpu_readback::Readback::buffer(res_buf.0.clone()))
+                .observe(|trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut picked: ResMut<PickedCar>| {
+                    let data = trigger.event().to_shader_type::<[u32; 2]>();
+                    let id = data[0];
+                    if id != 0xFFFFFFFF {
+                        picked.0 = Some(id);
+                    } else {
+                        picked.0 = None;
+                    }
+                });
+        }
+    }
+    *last_active = params.is_active;
+}
+
+#[derive(Resource, Clone, ExtractResource)]
+pub struct PickingResultBufferHandle(pub Handle<bevy::render::storage::ShaderStorageBuffer>);
+
 
 #[derive(Resource, Default)]
 pub struct PickedCar(pub Option<u32>);
@@ -177,10 +192,7 @@ impl FromWorld for GpuPickingPipeline {
 #[derive(Resource, Default)]
 struct GpuPickingBuffers {
     pub params: Option<Buffer>,
-    pub result: Option<Buffer>,
-    pub readback: Option<Buffer>,
     pub bind_group: Option<BindGroup>,
-    pub readback_mapped: Arc<AtomicBool>,
 }
 
 fn prepare_picking_buffers(
@@ -199,24 +211,6 @@ fn prepare_picking_buffers(
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         }));
     }
-
-    if buffers.result.is_none() {
-        buffers.result = Some(render_device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_picking_result_buffer"),
-            size: 8, // u32 id, f32 dist
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
-    }
-
-    if buffers.readback.is_none() {
-        buffers.readback = Some(render_device.create_buffer(&BufferDescriptor {
-            label: Some("gpu_picking_readback_buffer"),
-            size: 8,
-            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        }));
-    }
 }
 
 fn queue_picking_bind_group(
@@ -225,12 +219,25 @@ fn queue_picking_bind_group(
     gpu_images: Res<bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>>,
     textures: Res<GpuSimTextures>,
     mut buffers: ResMut<GpuPickingBuffers>,
+    picking_res: Option<Res<PickingResultBufferHandle>>,
+    storage_buffers: Res<bevy::render::render_asset::RenderAssets<bevy::render::storage::GpuShaderStorageBuffer>>,
 ) {
-    let (Some(transforms), Some(params_buf), Some(result_buf)) = (
+    let (Some(transforms), Some(params_buf)) = (
         textures.car_transforms.as_ref().and_then(|h| gpu_images.get(h)),
         buffers.params.as_ref(),
-        buffers.result.as_ref(),
     ) else { return; };
+    
+    let res_buf_binding = if let Some(handle) = picking_res {
+        if let Some(gpu_buf) = storage_buffers.get(&handle.0) {
+            Some(gpu_buf.buffer.as_entire_binding())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    
+    let Some(res_buf) = res_buf_binding else { return; };
 
     let bg = render_device.create_bind_group(
         None,
@@ -238,7 +245,7 @@ fn queue_picking_bind_group(
         &BindGroupEntries::sequential((
             transforms.texture_view.into_binding(),
             params_buf.as_entire_binding(),
-            result_buf.as_entire_binding(),
+            res_buf,
         )),
     );
     buffers.bind_group = Some(bg);
@@ -263,22 +270,23 @@ impl bevy::render::render_graph::Node for GpuPickingNode {
         let pipeline_id = world.resource::<GpuPickingPipeline>().pipeline;
         let buffers = world.resource::<GpuPickingBuffers>();
 
-        if buffers.readback_mapped.load(Ordering::Relaxed) {
-            return Ok(());
-        }
+        let res_buf_binding = if let Some(handle) = world.get_resource::<PickingResultBufferHandle>() {
+            let storage_buffers = world.resource::<bevy::render::render_asset::RenderAssets<bevy::render::storage::GpuShaderStorageBuffer>>();
+            if let Some(gpu_buf) = storage_buffers.get(&handle.0) {
+                Some(gpu_buf.buffer.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
-        if let (Some(pipeline), Some(bg), Some(result), Some(readback)) = (
+        if let (Some(pipeline), Some(bg), Some(result)) = (
             pipeline_cache.get_compute_pipeline(pipeline_id),
             buffers.bind_group.as_ref(),
-            buffers.result.as_ref(),
-            buffers.readback.as_ref()
+            res_buf_binding,
         ) {
-            // Clear result buffer: ID = 0xFFFFFFFF, Dist = INF (f32::MAX bit pattern)
-            let _clear_data: [u32; 2] = [0xFFFFFFFF, 0x7F7FFFFF];
-            render_context.command_encoder().clear_buffer(result, 0, Some(8));
-            // Actually, clear buffer only writes zeros.
-            // Let's copy a small initialization buffer instead.
-            // But we don't have one prepared. Let's do it in the shader on ID 0.
+            render_context.command_encoder().clear_buffer(&result, 0, Some(8));
 
             let mut pass = render_context.command_encoder().begin_compute_pass(&ComputePassDescriptor {
                 label: Some("gpu_picking_pass"),
@@ -291,52 +299,9 @@ impl bevy::render::render_graph::Node for GpuPickingNode {
                 pass.dispatch_workgroups(wg_count, 1, 1);
             }
             drop(pass);
-
-            render_context.command_encoder().copy_buffer_to_buffer(result, 0, readback, 0, 8);
         }
 
         Ok(())
     }
 }
 
-use std::sync::mpsc::{Sender, Receiver};
-
-#[derive(Resource)]
-pub struct PickSender(pub std::sync::Mutex<Sender<Option<u32>>>);
-
-#[derive(Resource)]
-pub struct PickReceiver(pub std::sync::Mutex<Receiver<Option<u32>>>);
-
-fn readback_picking_result(
-    _render_device: Res<RenderDevice>,
-    buffers: ResMut<GpuPickingBuffers>,
-    params: Res<PickingParams>,
-    sender: Res<PickSender>,
-) {
-    if params.is_active > 0 && !buffers.readback_mapped.load(Ordering::Relaxed) {
-        if let Some(readback) = buffers.readback.as_ref() {
-            buffers.readback_mapped.store(true, Ordering::Relaxed);
-            
-            let r_clone = readback.clone();
-            let mapped_flag = buffers.readback_mapped.clone();
-            let tx = sender.0.lock().unwrap().clone();
-            
-            readback.slice(..).map_async(MapMode::Read, move |res| {
-                if res.is_ok() {
-                    let data = r_clone.slice(..).get_mapped_range();
-                    let res_data: [u32; 2] = *bytemuck::from_bytes(&data[0..8]);
-                    drop(data);
-                    r_clone.unmap();
-                    
-                    let id = res_data[0];
-                    if id != 0xFFFFFFFF {
-                        let _ = tx.send(Some(id));
-                    } else {
-                        let _ = tx.send(None);
-                    }
-                }
-                mapped_flag.store(false, Ordering::Relaxed);
-            });
-        }
-    }
-}

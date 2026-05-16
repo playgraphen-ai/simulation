@@ -70,7 +70,6 @@ impl Plugin for ComputePlugin {
                 spawn::handle_spawn_requests,
                 update_schedule_state,
                 sync_gpu_textures_and_params,
-                gpu_sim::apply_gpu_readback,
                 queue_texture_updates_system,
             ).chain().run_if(in_state(AppState::InGame)));
     }
