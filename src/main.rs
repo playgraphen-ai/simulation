@@ -216,6 +216,11 @@ fn main() {
         .init_resource::<DetailedTimings>()
         .insert_resource(TimingsReceiver(Mutex::new(rx)))
         .add_plugins(DefaultPlugins
+            .set(bevy::log::LogPlugin {
+                filter: "info,wgpu_core=warn,wgpu_hal=warn,bevy_render::gpu_readback=error,bevy_pbr::render::gpu_preprocess=error,naga=warn".into(),
+                level: bevy::log::Level::INFO,
+                ..default()
+            })
             .set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Real City".into(),

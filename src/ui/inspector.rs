@@ -189,7 +189,7 @@ pub fn update_inspector_ui(
     buildings: Res<BuildingData>,
     people: Res<PeopleData>,
     roads: Res<RoadData>,
-    settings: Res<crate::sim::SimSettings>,
+    _settings: Res<crate::sim::SimSettings>,
     mut text_q: Query<&mut Text, With<InspectorText>>,
 ) {
     let Ok(mut text) = text_q.single_mut() else { return; };
