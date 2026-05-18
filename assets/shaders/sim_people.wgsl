@@ -653,9 +653,8 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let home_seg = h_tex1.w;
             let home_t = h_tex2.z;
 
-            let time_since_rent = rand(&rng_state) * 300.0;
             // Initialize AT HOME instead of entering from map edge
-            texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, time_since_rent, f32(home_id), f32(home_id));
+            texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, -1.0, f32(home_id), f32(home_id));
             texel1 = vec4<f32>(f32(work_id), ACT_HOME, params.home_duration * rand(&rng_state), 0.0);
             texel2 = vec4<f32>(home_seg, home_seg, home_t, 0.0); // No target_t needed yet
             texel3 = vec4<f32>(10.0 + rand(&rng_state) * 90.0, 0.0, 0.0, 0.0);
@@ -776,10 +775,46 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             let target_seg = u32(next_b_tex1.w);
             let target_t = next_b_tex2.z;
 
-            // Check if start segment is full
+            // Check if start position in occupancy grid is free
             let start_r_coords = road_coords(start_seg);
-            let start_r_tex1 = textureLoad(roads_tex, start_r_coords[1]);
-            if start_r_tex1.x <= 0.15 {
+            let r_tex0 = textureLoad(roads_tex, start_r_coords[0]);
+            let r_tex4 = textureLoad(roads_tex, start_r_coords[4]);
+            let rtype = r_tex4.x;
+
+            let ax = r_tex0.x; let ay = r_tex0.y;
+            let bx = r_tex0.z; let by = r_tex0.w;
+            let dir = normalize(vec2<f32>(bx - ax, by - ay));
+            let side = vec2<f32>(-dir.y, dir.x);
+
+            var offset = 0.35;
+            if rtype == 1.0 { // Highway2x4
+                let lane = f32(pid % 4u);
+                offset = 0.5 + lane * 0.675;
+            } else if rtype == 2.0 { // Highway2x8
+                let lane = f32(pid % 8u);
+                offset = 0.5 + lane * 0.45;
+            }
+
+            let pos = mix(vec2<f32>(ax, ay), vec2<f32>(bx, by), start_t) + side * offset;
+            let tx = u32(pos.x + 0.5);
+            let ty = u32(pos.y + 0.5);
+            let idx = tx + ty * params.grid_w;
+
+            var is_blocked = false;
+            var reserved_idx: i32 = -1;
+
+            if params.collisions_enabled > 0.5 {
+                if idx < params.grid_w * params.grid_h {
+                    let old_occ = atomicExchange(&occupancy[idx], 1u);
+                    if old_occ > 0u {
+                        is_blocked = true;
+                    } else {
+                        reserved_idx = i32(idx);
+                    }
+                }
+            }
+
+            if is_blocked {
                 // Wait for space
                 // Revert building occupancy (did not leave yet)
                 atomicAdd(&building_stats[current_building * 3u], 1u);
@@ -802,8 +837,9 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             activity = ACT_TRAVEL;
             activity_time = -10.0; // Negative means waiting for path (timeout timer)
             path_cursor = 0.0;
-            
+
             texel0.x = money;
+            texel0.y = f32(reserved_idx);
             texel0.z = destination;
             texel1.y = activity;
             texel1.z = activity_time;
@@ -812,8 +848,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             texel2.y = f32(start_seg);
             texel2.z = start_t;
             texel2.w = target_t;
-            texel3.x = food_stock;
-            
+            texel3.x = food_stock;            
             textureStore(people_tex, coords[0], texel0);
             textureStore(people_tex, coords[1], texel1);
             textureStore(people_tex, coords[2], texel2);
