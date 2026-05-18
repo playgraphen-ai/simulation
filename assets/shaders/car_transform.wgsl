@@ -124,9 +124,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let c2 = vec2<i32>((base + 2) % pw, (base + 2) / pw);
     let c3 = vec2<i32>((base + 3) % pw, (base + 3) / pw);
 
+    let tex0 = textureLoad(people_tex, c0);
     let tex1 = textureLoad(people_tex, c1);
     let tex2 = textureLoad(people_tex, c2);
 
+    let money = tex0.x;
     let activity = tex1.y;
     let activity_time = tex1.z;
     let current_seg = u32(tex2.x);
@@ -142,7 +144,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var is_white = 0.0;
     var has_car = false;
 
-    if (activity == 0.0 || activity == 4.0) && current_seg != 0xFFFFFFFFu {
+    if money > 0.0 && (activity == 0.0 || activity == 4.0) && current_seg != 0xFFFFFFFFu {
         has_car = true;
         if activity == 4.0 { is_white = 1.0; }
         let rw = i32(params.roads_tex_w);

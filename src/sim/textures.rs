@@ -25,18 +25,45 @@ pub fn create_data_textures(
     grid_w: u32,
     grid_h: u32,
 ) -> DataTextures {
-    // 4 texels per car (for a mat4x4). We can make it 1024 width.
+    // 4 texels per person. We can make it 1024 width.
     let transforms_width = 1024u32;
     let transforms_height = ((super::people::PEOPLE_CAPACITY * 4) + transforms_width - 1) / transforms_width;
 
     DataTextures {
-        people: images.add(new_f32_texture(people.tex_width, people.tex_height, TextureFormat::Rgba32Float)),
-        roads: images.add(new_f32_texture(roads.tex_width, roads.tex_height, TextureFormat::Rgba32Float)),
-        buildings: images.add(new_f32_texture(buildings.tex_width, buildings.tex_height, TextureFormat::Rgba32Float)),
+        people: images.add(new_f32_texture_with_data(people.tex_width, people.tex_height, TextureFormat::Rgba32Float, bytemuck::cast_slice(&people.rows))),
+        roads: images.add(new_f32_texture_with_data(roads.tex_width, roads.tex_height, TextureFormat::Rgba32Float, bytemuck::cast_slice(&roads.rows))),
+        buildings: images.add(new_f32_texture_with_data(buildings.tex_width, buildings.tex_height, TextureFormat::Rgba32Float, bytemuck::cast_slice(&buildings.rows))),
         elevations: images.add(new_f32_texture(grid_w, grid_h, TextureFormat::R32Float)),
         road_points: images.add(new_f32_texture(1024, 1024, TextureFormat::Rg32Float)),
         car_transforms: images.add(new_f32_texture(transforms_width, transforms_height, TextureFormat::Rgba32Float)),
     }
+}
+
+fn new_f32_texture_with_data(w: u32, h: u32, format: TextureFormat, data: &[u8]) -> Image {
+    let pixel_size = match format {
+        TextureFormat::Rgba32Float => 16,
+        TextureFormat::R32Float => 4,
+        TextureFormat::Rg32Float => 8,
+        _ => 16,
+    };
+    let expected_len = (w * h) as usize * pixel_size;
+    let mut padded_data = data.to_vec();
+    if padded_data.len() < expected_len {
+        padded_data.resize(expected_len, 0);
+    } else if padded_data.len() > expected_len {
+        padded_data.truncate(expected_len);
+    }
+
+    let mut img = Image::new(
+        Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        padded_data,
+        format,
+        RenderAssetUsages::default(),
+    );
+    img.texture_descriptor.usage =
+        TextureUsages::COPY_DST | TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING;
+    img
 }
 
 fn new_f32_texture(w: u32, h: u32, format: TextureFormat) -> Image {

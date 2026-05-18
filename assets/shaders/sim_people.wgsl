@@ -155,15 +155,17 @@ fn main_people_occupancy(@builtin(global_invocation_id) gid: vec3<u32>) {
     if pid >= params.people_count { return; }
 
     let coords = person_coords(pid);
+    let texel0 = textureLoad(people_tex, coords[0]);
     let tex1 = textureLoad(people_tex, coords[1]);
     let tex2 = textureLoad(people_tex, coords[2]);
 
+    let money = texel0.x;
     let activity = tex1.y;
     let current_seg = u32(tex2.x);
     let prev_seg = tex2.y;
     let activity_time = tex1.z;
 
-    if activity == ACT_TRAVEL && current_seg != 0xFFFFFFFFu {
+    if money > 0.0 && activity == ACT_TRAVEL && current_seg != 0xFFFFFFFFu {
         let r_coords = road_coords(current_seg);
         let r_tex0 = textureLoad(roads_tex, r_coords[0]);
         let r_tex1 = textureLoad(roads_tex, r_coords[1]);
