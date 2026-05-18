@@ -22,6 +22,7 @@ struct SimParams {
     rent_cost: f32,
     work_salary: f32,
     shop_cost: f32,
+    shop_food_gain: f32,
     tax_income: f32,
     tax_rent: f32,
     tax_consumption: f32,

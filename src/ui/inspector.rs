@@ -189,6 +189,7 @@ pub fn update_inspector_ui(
     buildings: Res<BuildingData>,
     people: Res<PeopleData>,
     roads: Res<RoadData>,
+    settings: Res<crate::sim::SimSettings>,
     mut text_q: Query<&mut Text, With<InspectorText>>,
 ) {
     let Ok(mut text) = text_q.single_mut() else { return; };
@@ -237,8 +238,8 @@ pub fn update_inspector_ui(
                 let d_id = if r.destination as u32 == 0xFFFFFFFF { "None".to_string() } else { (r.destination as u32).to_string() };
                 
                 text.0 = format!(
-                    "--- PERSON {} ---\nAge: {:.0}\nMoney: ${:.0}\nHome ID: {}\nWork ID: {}\nDest ID: {}\nActivity: {}\nTime left: {:.1}s",
-                    pid, r.age, r.money, h_id, w_id, d_id, act, r.activity_time
+                    "Inhabitant #{}\nAge: {:.0}\nMoney: ${:.0}\nFood: {:.0} units\n(Shop: +{:.0} food for ${:.0})\nHome ID: {}\nWork ID: {}\nDest ID: {}\nActivity: {}\nTime left: {:.1}s",
+                    pid, r.age, r.money, r.food_stock, settings.shop_food_gain, settings.shop_cost, h_id, w_id, d_id, act, r.activity_time
                 );
             }
         }

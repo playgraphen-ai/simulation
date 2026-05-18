@@ -51,6 +51,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let click_radius_sq = 4.0 * 4.0; // Keep the same 4.0 radius logic
 
     if dist_to_ray_sq < click_radius_sq {
+        // Retrieve the actual person ID from the 3rd texel's alpha channel
+        let tx2 = (t_idx + 2u) % t_w;
+        let ty2 = (t_idx + 2u) / t_w;
+        let color_texel = textureLoad(transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), 0);
+        let actual_pid = u32(color_texel.w);
+
         // We found a hit. Update result using a spinlock-like atomic CAS for float min
         var current_min_dist = atomicLoad(&result.dist);
         var dist_bits = bitcast<u32>(dist_along_ray);
@@ -62,7 +68,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             let res = atomicCompareExchangeWeak(&result.dist, current_min_dist, dist_bits);
             if res.exchanged {
-                atomicStore(&result.id, pid);
+                atomicStore(&result.id, actual_pid);
                 break;
             }
             current_min_dist = res.old_value;

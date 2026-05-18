@@ -15,7 +15,7 @@ use bytemuck::{Pod, Zeroable};
 
 use crate::sim::constants::MAX_PEOPLE;
 pub const PEOPLE_CAPACITY: u32 = MAX_PEOPLE;
-pub const TEXELS_PER_PERSON: u32 = 3;
+pub const TEXELS_PER_PERSON: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -30,8 +30,12 @@ pub struct PersonRow {
     pub path_cursor: f32,
     pub current_seg: f32,
     pub prev_seg: f32,
+    pub start_t: f32,
+    pub target_t: f32,
+    pub food_stock: f32,
     pub _pad0: f32,
     pub _pad1: f32,
+    pub _pad2: f32,
 }
 
 impl Default for PersonRow {
@@ -47,8 +51,12 @@ impl Default for PersonRow {
             path_cursor: 0.0,
             current_seg: -1.0,
             prev_seg: -1.0,
+            start_t: 0.0,
+            target_t: 0.0,
+            food_stock: 0.0,
             _pad0: 0.0,
             _pad1: 0.0,
+            _pad2: 0.0,
         }
     }
 }

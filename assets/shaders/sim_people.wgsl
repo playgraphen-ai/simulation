@@ -12,6 +12,7 @@ struct SimParams {
     rent_cost: f32,
     work_salary: f32,
     shop_cost: f32,
+    shop_food_gain: f32,
     tax_income: f32,
     tax_rent: f32,
     tax_consumption: f32,
@@ -97,13 +98,14 @@ struct GpuStats {
 @group(0) @binding(8) var<storage, read_write> occupancy: array<atomic<u32>>;
 @group(0) @binding(9) var<storage, read_write> building_stats: array<atomic<u32>>; // occupants: idx*3, assigned: idx*3+1, tax: idx*3+2
 
-fn person_coords(pid: u32) -> array<vec2<i32>, 3> {
-    let base = i32(pid * 3u);
+fn person_coords(pid: u32) -> array<vec2<i32>, 4> {
+    let base = i32(pid * 4u);
     let w = max(1, i32(params.people_tex_w));
     let c0 = vec2<i32>(base % w, base / w);
     let c1 = vec2<i32>((base + 1) % w, (base + 1) / w);
     let c2 = vec2<i32>((base + 2) % w, (base + 2) / w);
-    return array<vec2<i32>, 3>(c0, c1, c2);
+    let c3 = vec2<i32>((base + 3) % w, (base + 3) / w);
+    return array<vec2<i32>, 4>(c0, c1, c2, c3);
 }
 
 fn building_coords(bid: u32) -> array<vec2<i32>, 3> {
@@ -219,6 +221,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
     var texel0 = textureLoad(people_tex, coords[0]);
     var texel1 = textureLoad(people_tex, coords[1]);
     var texel2 = textureLoad(people_tex, coords[2]);
+    var texel3 = textureLoad(people_tex, coords[3]);
 
     let was_car = (texel1.y == ACT_TRAVEL || texel1.y == ACT_ARRIVED);
 
@@ -513,6 +516,7 @@ fn main_people_movement(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(people_tex, coords[0], texel0);
     textureStore(people_tex, coords[1], texel1);
     textureStore(people_tex, coords[2], texel2);
+    textureStore(people_tex, coords[3], texel3);
 }
 
 @compute @workgroup_size(1)
@@ -547,6 +551,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
     var texel0 = textureLoad(people_tex, coords[0]);
     var texel1 = textureLoad(people_tex, coords[1]);
     var texel2 = textureLoad(people_tex, coords[2]);
+    var texel3 = textureLoad(people_tex, coords[3]);
 
     let was_car = (texel1.y == ACT_TRAVEL || texel1.y == ACT_ARRIVED);
 
@@ -653,6 +658,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             texel0 = vec4<f32>(50.0 + rand(&rng_state) * 450.0, time_since_rent, f32(home_id), f32(home_id));
             texel1 = vec4<f32>(f32(work_id), ACT_HOME, params.home_duration * rand(&rng_state), 0.0);
             texel2 = vec4<f32>(home_seg, home_seg, home_t, 0.0); // No target_t needed yet
+            texel3 = vec4<f32>(10.0 + rand(&rng_state) * 90.0, 0.0, 0.0, 0.0);
             
             // Re-load variables for simulation
             money = texel0.x;
@@ -666,6 +672,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             textureStore(people_tex, coords[0], texel0);
             textureStore(people_tex, coords[1], texel1);
             textureStore(people_tex, coords[2], texel2);
+            textureStore(people_tex, coords[3], texel3);
         } else {
             texel1.y = ACT_HOME;
             texel1.z = params.home_duration;
@@ -685,6 +692,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
     var activity = texel1.y;
     var activity_time = texel1.z;
     var path_cursor = texel1.w;
+    var food_stock = texel3.x;
 
     if activity == ACT_HOME || activity == ACT_WORK || activity == ACT_SHOP {
         let logic_dt = params.dt * f32(params.cycle_frames);
@@ -698,6 +706,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let rent = params.rent_cost;
                 let tax = rent * params.tax_rent;
                 money = max(0.0, money - (rent + tax));
+                food_stock = max(0.0, food_stock - 1.0); // Decrement food stock on rent payment
                 atomicAdd(&building_stats[current_building * 3u + 2u], u32(tax));
                 atomicAdd(&stats.tax_rent_total, u32(tax));
             } else if activity == ACT_WORK {
@@ -708,9 +717,10 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
                 atomicAdd(&building_stats[current_building * 3u + 2u], u32(tax));
                 atomicAdd(&stats.tax_income_total, u32(tax));
             } else if activity == ACT_SHOP {
-                let cost = params.shop_cost;
+                let cost = params.shop_cost; // Fixed cost for 100 food
                 let tax = cost * params.tax_consumption;
                 money = max(0.0, money - (cost + tax));
+                food_stock = food_stock + params.shop_food_gain; // Gain 100 food
                 current_building = u32(destination);
                 atomicAdd(&building_stats[current_building * 3u + 2u], u32(tax));
                 atomicAdd(&stats.tax_consumption_total, u32(tax));
@@ -728,10 +738,10 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             // Pick next activity
             var next_activity = ACT_HOME;
             if activity == ACT_HOME {
-                if rand(&rng_state) < params.home_to_work_prob {
-                    next_activity = ACT_WORK;
-                } else {
+                if food_stock < 10.0 {
                     next_activity = ACT_SHOP;
+                } else {
+                    next_activity = ACT_WORK;
                 }
             }
 
@@ -802,10 +812,12 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             texel2.y = f32(start_seg);
             texel2.z = start_t;
             texel2.w = target_t;
+            texel3.x = food_stock;
             
             textureStore(people_tex, coords[0], texel0);
             textureStore(people_tex, coords[1], texel1);
             textureStore(people_tex, coords[2], texel2);
+            textureStore(people_tex, coords[3], texel3);
         }
     }
 }

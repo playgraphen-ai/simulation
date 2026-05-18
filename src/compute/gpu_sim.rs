@@ -273,6 +273,7 @@ pub struct GpuSimParams {
     pub rent_cost: f32,
     pub work_salary: f32,
     pub shop_cost: f32,
+    pub shop_food_gain: f32,
     pub tax_income: f32,
     pub tax_rent: f32,
     pub tax_consumption: f32,
@@ -324,6 +325,7 @@ impl Default for GpuSimParams {
             rent_cost: 20.0,
             work_salary: 50.0,
             shop_cost: 30.0,
+            shop_food_gain: 100.0,
             tax_income: 0.15,
             tax_rent: 0.1,
             tax_consumption: 0.08,
@@ -1079,7 +1081,7 @@ impl GpuSimNode {
                     Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
                         if let (Some(people_h), Some(p_buf)) = (textures.people.as_ref(), storage_buffers.get(readback_handles.inspector_p_buf.id())) {
                             if let Some(gpu_img) = gpu_images.get(people_h) {
-                                let texel_idx = pid * 3;
+                                let texel_idx = pid * 4;
                                 let x = texel_idx % params.people_tex_w;
                                 let y = texel_idx / params.people_tex_w;
                                 let mut tex_info = gpu_img.texture.as_image_copy();
@@ -1094,7 +1096,7 @@ impl GpuSimNode {
                                             rows_per_image: None,
                                         },
                                     },
-                                    Extent3d { width: 3, height: 1, depth_or_array_layers: 1 },
+                                    Extent3d { width: 4, height: 1, depth_or_array_layers: 1 },
                                 );
                                 last_copy.0.store(selection.changed_frame, Ordering::Relaxed);
                             }
@@ -1314,6 +1316,7 @@ pub fn update_gpu_sim_params(
     gpu_params.rent_cost = settings.rent_cost;
     gpu_params.work_salary = settings.work_salary;
     gpu_params.shop_cost = settings.shop_cost;
+    gpu_params.shop_food_gain = settings.shop_food_gain;
     gpu_params.tax_income = settings.tax_income;
     gpu_params.tax_rent = settings.tax_rent;
     gpu_params.tax_consumption = settings.tax_consumption;

@@ -14,6 +14,7 @@ struct CarMaterialParams {
     rent_cost: f32,
     work_salary: f32,
     shop_cost: f32,
+    shop_food_gain: f32,
     tax_income: f32,
     tax_rent: f32,
     tax_consumption: f32,
@@ -116,11 +117,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let pid = global_id.x;
     if pid >= params.people_count { return; }
 
-    let base = i32(pid * 3u);
+    let base = i32(pid * 4u);
     let pw = i32(params.people_tex_w);
     let c0 = vec2<i32>(base % pw, base / pw);
     let c1 = vec2<i32>((base + 1) % pw, (base + 1) / pw);
     let c2 = vec2<i32>((base + 2) % pw, (base + 2) / pw);
+    let c3 = vec2<i32>((base + 3) % pw, (base + 3) / pw);
 
     let tex1 = textureLoad(people_tex, c1);
     let tex2 = textureLoad(people_tex, c2);
@@ -251,7 +253,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let ty2 = (t_idx + 2u) / t_w;
             let hue = fract(f32(pid) * 0.6180339887);
             let color = hsv2rgb(vec3<f32>(hue, 0.8, 0.9));
-            textureStore(car_transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), vec4<f32>(color.r, color.g, color.b, 1.0));
+            textureStore(car_transforms_tex, vec2<i32>(i32(tx2), i32(ty2)), vec4<f32>(color.r, color.g, color.b, f32(pid)));
         }
     }
 }

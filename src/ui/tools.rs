@@ -55,6 +55,7 @@ pub enum SliderKind {
     RentCost,
     WorkSalary,
     ShopCost,
+    ShopFoodGain,
     Collisions,
     TaxIncome,
     TaxRent,
@@ -143,6 +144,7 @@ pub fn setup_toolbar(mut commands: Commands, config: Res<SimConfig>, settings: R
             slider_row(content, "Rent Cost", SliderKind::RentCost, 0.0, 100.0, settings.rent_cost);
             slider_row(content, "Work Pay", SliderKind::WorkSalary, 10.0, 200.0, settings.work_salary);
             slider_row(content, "Shop Cost", SliderKind::ShopCost, 0.0, 100.0, settings.shop_cost);
+            slider_row(content, "Shop Gain", SliderKind::ShopFoodGain, 10.0, 500.0, settings.shop_food_gain);
             slider_row(content, "Collisions", SliderKind::Collisions, 0.0, 1.0, settings.collisions_enabled);
 
             label(content, "TAXATION (%)");
@@ -362,6 +364,7 @@ pub fn handle_sliders(
                 SliderKind::RentCost => settings.rent_cost = value,
                 SliderKind::WorkSalary => settings.work_salary = value,
                 SliderKind::ShopCost => settings.shop_cost = value,
+                SliderKind::ShopFoodGain => settings.shop_food_gain = value,
                 SliderKind::Collisions => settings.collisions_enabled = value.round(), // Snap to 0.0 or 1.0
                 SliderKind::TaxIncome => settings.tax_income = value,
                 SliderKind::TaxRent => settings.tax_rent = value,
