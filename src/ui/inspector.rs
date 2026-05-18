@@ -207,8 +207,8 @@ pub fn update_inspector_ui(
         Some(SelectedObj::Road(rid)) => {
             if let Some(seg) = roads.segments.get(rid as usize) {
                 text.0 = format!(
-                    "--- ROAD ---\nID: {}\nSpeed multiplier: {:.2}x\nLength: {:.1}m\nConnections: A({}), B({})",
-                    rid, seg.speed_mean, seg.length, seg.conn_a.len(), seg.conn_b.len()
+                    "--- ROAD ---\nID: {}\nDensity: {:.1} cars\nSpeed multiplier: {:.2}x\nLength: {:.1}m\nConnections: A({}), B({})",
+                    rid, seg.density, seg.speed_mean, seg.length, seg.conn_a.len(), seg.conn_b.len()
                 );
             }
         }

@@ -151,4 +151,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     
     // Store updated speed back to the texture
     textureStore(roads_tex, coords[1], tex1);
+
+    // Store density in tex4.z (unused2)
+    var tex4 = textureLoad(roads_tex, coords[4]);
+    tex4.z = estimated_cars;
+    textureStore(roads_tex, coords[4], tex4);
 }

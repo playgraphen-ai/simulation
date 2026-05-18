@@ -209,10 +209,9 @@ fn sync_gpu_textures_and_params(
     // Inspector throttling
     let mut do_inspector = 0;
     if let Some(sel) = selection {
-        let now = state.time.elapsed_secs_f64();
-        if sel.changed_frame != throttler.last_frame || (now - throttler.last_update) > 0.2 {
+        if sel.changed_frame != throttler.last_frame {
             do_inspector = 1;
-            throttler.last_update = now;
+            throttler.last_update = state.time.elapsed_secs_f64();
             throttler.last_frame = sel.changed_frame;
         }
     }

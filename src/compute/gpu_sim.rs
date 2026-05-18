@@ -177,6 +177,7 @@ struct GpuStatsBuffer(Option<Buffer>);
 pub struct GpuReadbackBufferHandles {
     pub inspector_p_buf: Handle<bevy::render::storage::ShaderStorageBuffer>,
     pub inspector_b_buf: Handle<bevy::render::storage::ShaderStorageBuffer>,
+    pub inspector_r_buf: Handle<bevy::render::storage::ShaderStorageBuffer>,
     pub stats_buffer: Handle<bevy::render::storage::ShaderStorageBuffer>,
 }
 
@@ -197,12 +198,16 @@ impl Plugin for GpuSimPlugin {
         let mut b_buf = bevy::render::storage::ShaderStorageBuffer::from(vec![0u32; 64]);
         b_buf.buffer_description.usage |= bevy::render::render_resource::BufferUsages::COPY_DST | bevy::render::render_resource::BufferUsages::COPY_SRC;
         
+        let mut r_buf = bevy::render::storage::ShaderStorageBuffer::from(vec![0u32; 64]);
+        r_buf.buffer_description.usage |= bevy::render::render_resource::BufferUsages::COPY_DST | bevy::render::render_resource::BufferUsages::COPY_SRC;
+
         let mut s_buf = bevy::render::storage::ShaderStorageBuffer::from(vec![0u32; std::mem::size_of::<GpuStats>() / 4 + 1]);
         s_buf.buffer_description.usage |= bevy::render::render_resource::BufferUsages::COPY_DST | bevy::render::render_resource::BufferUsages::COPY_SRC;
 
         let handles = GpuReadbackBufferHandles {
             inspector_p_buf: buffers.add(p_buf),
             inspector_b_buf: buffers.add(b_buf),
+            inspector_r_buf: buffers.add(r_buf),
             stats_buffer: buffers.add(s_buf),
         };
         app.insert_resource(handles);
@@ -1126,6 +1131,30 @@ impl GpuSimNode {
                             }
                         }
                     }
+                    Some(crate::ui::inspector::SelectedObj::Road(rid)) => {
+                        if let (Some(roads_h), Some(r_buf)) = (textures.roads.as_ref(), storage_buffers.get(readback_handles.inspector_r_buf.id())) {
+                            if let Some(gpu_img) = gpu_images.get(roads_h) {
+                                let texel_idx = rid * 5;
+                                let x = texel_idx % params.roads_tex_w;
+                                let y = texel_idx / params.roads_tex_w;
+                                let mut tex_info = gpu_img.texture.as_image_copy();
+                                tex_info.origin = Origin3d { x, y, z: 0 };
+                                render_context.command_encoder().copy_texture_to_buffer(
+                                    tex_info,
+                                    TexelCopyBufferInfo {
+                                        buffer: &r_buf.buffer,
+                                        layout: TexelCopyBufferLayout {
+                                            offset: 0,
+                                            bytes_per_row: Some(256),
+                                            rows_per_image: None,
+                                        },
+                                    },
+                                    Extent3d { width: 5, height: 1, depth_or_array_layers: 1 },
+                                );
+                                last_copy.0.store(selection.changed_frame, Ordering::Relaxed);
+                            }
+                        }
+                    }
                     _ => {
                         if changed {
                             last_copy.0.store(selection.changed_frame, Ordering::Relaxed);
@@ -1215,7 +1244,8 @@ fn request_gpu_readback(
     if params.do_stats_readback > 0 {
         if *last_readback_frame != params.recount_slice {
             commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.stats_buffer.clone()))
-                .observe(|trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut counters: ResMut<crate::sim::counters::SimCounters>| {
+                .observe(|trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut commands: Commands, mut counters: ResMut<crate::sim::counters::SimCounters>| {
+                    commands.entity(trigger.entity).despawn();
                     let data = &trigger.event().data;
                     if data.len() >= std::mem::size_of::<GpuStats>() {
                         let stats: GpuStats = *bytemuck::from_bytes(&data[..std::mem::size_of::<GpuStats>()]);
@@ -1243,7 +1273,8 @@ fn request_gpu_readback(
             match sel.obj {
                 Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
                     commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.inspector_p_buf.clone()))
-                        .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut people: ResMut<crate::sim::people::PeopleData>| {
+                        .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut commands: Commands, mut people: ResMut<crate::sim::people::PeopleData>| {
+                            commands.entity(trigger.entity).despawn();
                             let data = &trigger.event().data;
                             if data.len() >= std::mem::size_of::<crate::sim::people::PersonRow>() {
                                 let row: crate::sim::people::PersonRow = *bytemuck::from_bytes(&data[..std::mem::size_of::<crate::sim::people::PersonRow>()]);
@@ -1255,7 +1286,8 @@ fn request_gpu_readback(
                 }
                 Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
                     commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.inspector_b_buf.clone()))
-                        .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut buildings: ResMut<BuildingData>, mut grid: ResMut<crate::sim::grid::CityGrid>, mut counters: ResMut<crate::sim::counters::SimCounters>| {
+                        .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut commands: Commands, mut buildings: ResMut<BuildingData>, mut grid: ResMut<crate::sim::grid::CityGrid>, mut counters: ResMut<crate::sim::counters::SimCounters>| {
+                            commands.entity(trigger.entity).despawn();
                             let data = &trigger.event().data;
                             if data.len() >= std::mem::size_of::<crate::sim::buildings::BuildingRow>() {
                                 let r: crate::sim::buildings::BuildingRow = *bytemuck::from_bytes(&data[..std::mem::size_of::<crate::sim::buildings::BuildingRow>()]);
@@ -1280,6 +1312,20 @@ fn request_gpu_readback(
                                             }
                                         }
                                     }
+                                }
+                            }
+                        });
+                }
+                Some(crate::ui::inspector::SelectedObj::Road(rid)) => {
+                    commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.inspector_r_buf.clone()))
+                        .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut commands: Commands, mut roads: ResMut<crate::sim::roads::RoadData>| {
+                            commands.entity(trigger.entity).despawn();
+                            let data = &trigger.event().data;
+                            if data.len() >= std::mem::size_of::<crate::sim::roads::RoadRow>() {
+                                let r: crate::sim::roads::RoadRow = *bytemuck::from_bytes(&data[..std::mem::size_of::<crate::sim::roads::RoadRow>()]);
+                                if let Some(seg) = roads.segments.get_mut(rid as usize) {
+                                    seg.speed_mean = r.speed_mean;
+                                    seg.density = r.unused2; // Density stored in unused2
                                 }
                             }
                         });

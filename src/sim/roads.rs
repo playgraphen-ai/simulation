@@ -97,6 +97,7 @@ pub struct RoadSegment {
     pub links_offset: u32,
     pub road_type: RoadType,
     pub major_id: Option<u32>,
+    pub density: f32,
 }
 
 #[derive(Resource)]
@@ -223,6 +224,7 @@ impl RoadData {
                         links_offset: 0,
                         road_type: rtype,
                         major_id: None,
+                        density: 0.0,
                     });
                 }
             }
@@ -271,6 +273,7 @@ impl RoadData {
                 links_offset: 0,
                 road_type: rtype,
                 major_id: None,
+                density: 0.0,
             });
         }
 
