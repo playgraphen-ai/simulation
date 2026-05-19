@@ -33,7 +33,7 @@ pub struct PersonRow {
     pub start_t: f32,
     pub target_t: f32,
     pub food_stock: f32,
-    pub _pad0: f32,
+    pub travel_start_time: f32,
     pub _pad1: f32,
     pub _pad2: f32,
 }
@@ -54,7 +54,7 @@ impl Default for PersonRow {
             start_t: 0.0,
             target_t: 0.0,
             food_stock: 0.0,
-            _pad0: 0.0,
+            travel_start_time: 0.0,
             _pad1: 0.0,
             _pad2: 0.0,
         }

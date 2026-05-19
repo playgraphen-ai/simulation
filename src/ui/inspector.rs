@@ -190,6 +190,7 @@ pub fn update_inspector_ui(
     people: Res<PeopleData>,
     roads: Res<RoadData>,
     _settings: Res<crate::sim::SimSettings>,
+    time: Res<Time>,
     mut text_q: Query<&mut Text, With<InspectorText>>,
 ) {
     let Ok(mut text) = text_q.single_mut() else { return; };
@@ -237,9 +238,15 @@ pub fn update_inspector_ui(
                 let w_id = if r.work as u32 == 0xFFFFFFFF { "None".to_string() } else { (r.work as u32).to_string() };
                 let d_id = if r.destination as u32 == 0xFFFFFFFF { "None".to_string() } else { (r.destination as u32).to_string() };
                 
+                let act_time_display = if r.activity_code as u32 == 0 {
+                    format!("{:.1}s elapsed", time.elapsed_secs() - r.travel_start_time)
+                } else {
+                    format!("{:.1}s left", r.activity_time)
+                };
+
                 text.0 = format!(
-                    "Inhabitant #{}\nAge: {:.0}\nMoney: ${:.0}\nFood: {:.0} units\nHome ID: {}\nWork ID: {}\nDest ID: {}\nActivity: {}\nTime left: {:.1}s",
-                    pid, r.age, r.money, r.food_stock, h_id, w_id, d_id, act, r.activity_time
+                    "Inhabitant #{}\nAge: {:.0}\nMoney: ${:.0}\nFood: {:.0} units\nHome ID: {}\nWork ID: {}\nDest ID: {}\nActivity: {}\nTime: {}",
+                    pid, r.age, r.money, r.food_stock, h_id, w_id, d_id, act, act_time_display
                 );
             }
         }

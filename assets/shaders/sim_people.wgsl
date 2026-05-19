@@ -46,6 +46,7 @@ struct SimParams {
     max_buildings: u32,
     max_path_len: u32,
     max_path_requests: u32,
+    sim_time: f32,
 };
 
 struct PathRequest {
@@ -851,6 +852,7 @@ fn main_people_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             texel2.z = start_t;
             texel2.w = target_t;
             texel3.x = food_stock;            
+            texel3.y = params.sim_time;
             textureStore(people_tex, coords[0], texel0);
             textureStore(people_tex, coords[1], texel1);
             textureStore(people_tex, coords[2], texel2);

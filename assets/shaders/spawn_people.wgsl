@@ -51,6 +51,7 @@ struct SimParams {
     max_buildings: u32,
     max_path_len: u32,
     max_path_requests: u32,
+    sim_time: f32,
 };
 
 @group(0) @binding(0) var people_tex: texture_storage_2d<rgba32float, read_write>;

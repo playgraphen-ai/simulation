@@ -312,6 +312,7 @@ pub struct GpuSimParams {
     pub max_buildings: u32,
     pub max_path_len: u32,
     pub max_path_requests: u32,
+    pub sim_time: f32,
 }
 
 impl Default for GpuSimParams {
@@ -364,6 +365,7 @@ impl Default for GpuSimParams {
             max_buildings: MAX_BUILDINGS,
             max_path_len: MAX_PATH_LEN,
             max_path_requests: MAX_PATH_REQUESTS,
+            sim_time: 0.0,
         }
     }
 }
@@ -1245,7 +1247,7 @@ fn request_gpu_readback(
         if *last_readback_frame != params.recount_slice {
             commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.stats_buffer.clone()))
                 .observe(|trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut commands: Commands, mut counters: ResMut<crate::sim::counters::SimCounters>| {
-                    commands.entity(trigger.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(trigger.entity) { e.despawn(); }
                     let data = &trigger.event().data;
                     if data.len() >= std::mem::size_of::<GpuStats>() {
                         let stats: GpuStats = *bytemuck::from_bytes(&data[..std::mem::size_of::<GpuStats>()]);
@@ -1274,7 +1276,7 @@ fn request_gpu_readback(
                 Some(crate::ui::inspector::SelectedObj::Person(pid)) => {
                     commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.inspector_p_buf.clone()))
                         .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut commands: Commands, mut people: ResMut<crate::sim::people::PeopleData>| {
-                            commands.entity(trigger.entity).despawn();
+                            if let Ok(mut e) = commands.get_entity(trigger.entity) { e.despawn(); }
                             let data = &trigger.event().data;
                             if data.len() >= std::mem::size_of::<crate::sim::people::PersonRow>() {
                                 let row: crate::sim::people::PersonRow = *bytemuck::from_bytes(&data[..std::mem::size_of::<crate::sim::people::PersonRow>()]);
@@ -1287,7 +1289,7 @@ fn request_gpu_readback(
                 Some(crate::ui::inspector::SelectedObj::Building(bid)) => {
                     commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.inspector_b_buf.clone()))
                         .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut commands: Commands, mut buildings: ResMut<BuildingData>, mut grid: ResMut<crate::sim::grid::CityGrid>, mut counters: ResMut<crate::sim::counters::SimCounters>| {
-                            commands.entity(trigger.entity).despawn();
+                            if let Ok(mut e) = commands.get_entity(trigger.entity) { e.despawn(); }
                             let data = &trigger.event().data;
                             if data.len() >= std::mem::size_of::<crate::sim::buildings::BuildingRow>() {
                                 let r: crate::sim::buildings::BuildingRow = *bytemuck::from_bytes(&data[..std::mem::size_of::<crate::sim::buildings::BuildingRow>()]);
@@ -1307,7 +1309,7 @@ fn request_gpu_readback(
                                         b.capacity = 0;
                                         if let Some(crate::sim::grid::Tile::Building(current_bid)) = grid.get(b.tile.0, b.tile.1) {
                                             if current_bid == bid {
-                                                grid.set(b.tile.0, b.tile.1, crate::sim::grid::Tile::Zone(b.btype));
+                                                grid.set(b.tile.0, b.tile.1, crate::sim::grid::Tile::Empty);
                                                 counters.destroyed_buildings += 1;
                                             }
                                         }
@@ -1319,7 +1321,7 @@ fn request_gpu_readback(
                 Some(crate::ui::inspector::SelectedObj::Road(rid)) => {
                     commands.spawn(bevy::render::gpu_readback::Readback::buffer(readback_buffers.inspector_r_buf.clone()))
                         .observe(move |trigger: bevy::ecs::observer::On<bevy::render::gpu_readback::ReadbackComplete>, mut commands: Commands, mut roads: ResMut<crate::sim::roads::RoadData>| {
-                            commands.entity(trigger.entity).despawn();
+                            if let Ok(mut e) = commands.get_entity(trigger.entity) { e.despawn(); }
                             let data = &trigger.event().data;
                             if data.len() >= std::mem::size_of::<crate::sim::roads::RoadRow>() {
                                 let r: crate::sim::roads::RoadRow = *bytemuck::from_bytes(&data[..std::mem::size_of::<crate::sim::roads::RoadRow>()]);
@@ -1381,4 +1383,5 @@ pub fn update_gpu_sim_params(
     gpu_params.max_buildings = MAX_BUILDINGS;
     gpu_params.max_path_len = MAX_PATH_LEN;
     gpu_params.max_path_requests = MAX_PATH_REQUESTS;
+    gpu_params.sim_time = time.elapsed_secs();
 }

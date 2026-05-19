@@ -56,6 +56,7 @@ struct SimParams {
     max_buildings: u32,
     max_path_len: u32,
     max_path_requests: u32,
+    sim_time: f32,
 };
 
 struct PathRequest {
