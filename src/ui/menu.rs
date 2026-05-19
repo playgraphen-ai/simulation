@@ -88,7 +88,7 @@ pub fn handle_menu_actions(
                     MenuAction::Large => { settings.grid_x = 25; settings.grid_y = 20; settings.population = 1000000; }
                 }
                 if let Ok(e) = root.single() {
-                    commands.entity(e).despawn();
+                    if let Ok(mut ent_cmd) = commands.get_entity(e) { ent_cmd.despawn(); }
                 }
                 next_state.set(AppState::InGame);
             }

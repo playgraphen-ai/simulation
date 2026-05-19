@@ -23,6 +23,12 @@ pub struct Selection {
     pub changed_frame: u32,
 }
 
+#[derive(Resource)]
+pub struct DestinationArrow {
+    pub car_id: u32,
+    pub timer: Timer,
+}
+
 #[derive(Component)]
 pub struct InspectorPanel;
 
@@ -128,6 +134,7 @@ pub fn toggle_inspector(
 }
 
 pub fn handle_selection(
+    mut commands: Commands,
     mouse: Res<ButtonInput<MouseButton>>,
     active: Res<ActiveTool>,
     cursor: Res<CursorTile>,
@@ -153,6 +160,10 @@ pub fn handle_selection(
     if let Some(car_id) = picked_car.0 {
         selection.obj = Some(SelectedObj::Person(car_id));
         selection.changed_frame += 1;
+        commands.insert_resource(DestinationArrow {
+            car_id,
+            timer: Timer::from_seconds(3.0, TimerMode::Once),
+        });
         return;
     }
 
@@ -250,5 +261,65 @@ pub fn update_inspector_ui(
                 );
             }
         }
+    }
+}
+
+pub fn draw_destination_arrow(
+    mut commands: Commands,
+    mut gizmos: Gizmos,
+    arrow: Option<ResMut<DestinationArrow>>,
+    time: Res<Time>,
+    people: Res<PeopleData>,
+    buildings: Res<BuildingData>,
+    roads: Res<RoadData>,
+    grid: Res<CityGrid>,
+) {
+    let Some(mut arrow) = arrow else { return; };
+    arrow.timer.tick(time.delta());
+    if arrow.timer.just_finished() {
+        commands.remove_resource::<DestinationArrow>();
+        return;
+    }
+
+    let pid = arrow.car_id;
+    if (pid as usize) >= people.rows.len() { return; }
+    let person = &people.rows[pid as usize];
+    
+    // Get car position (approximate)
+    let car_pos = if person.current_seg >= 0.0 {
+        let seg_id = person.current_seg as usize;
+        if let Some(seg) = roads.segments.get(seg_id) {
+            let t = person.target_t.clamp(0.0, 1.0);
+            let point_idx = (t * (seg.points.len() - 1) as f32).floor() as usize;
+            let next_idx = (point_idx + 1).min(seg.points.len() - 1);
+            let fract = (t * (seg.points.len() - 1) as f32) - point_idx as f32;
+            
+            let p1 = seg.points[point_idx];
+            let p2 = seg.points[next_idx];
+            
+            let x = p1.0 as f32 * (1.0 - fract) + p2.0 as f32 * fract + 0.5;
+            let z = p1.1 as f32 * (1.0 - fract) + p2.1 as f32 * fract + 0.5;
+            let elev = grid.elevations[grid.idx(p1.0, p1.1)];
+            Vec3::new(x, elev + 0.5, z)
+        } else {
+            return;
+        }
+    } else {
+        return;
+    };
+
+    // Get destination position
+    let dest_id = person.destination as u32;
+    if dest_id == 0xFFFFFFFF { return; }
+    if let Some(b) = buildings.items.get(dest_id as usize) {
+        let size = match b.btype {
+            ZoneType::Residential => 3.0,
+            _ => 4.0,
+        };
+        let offset = size / 2.0;
+        let elev = grid.elevations[grid.idx(b.tile.0, b.tile.1)];
+        let dest_pos = Vec3::new(b.tile.0 as f32 + offset, elev + 1.0, b.tile.1 as f32 + offset);
+        
+        gizmos.arrow(car_pos, dest_pos, Color::srgb(0.0, 1.0, 0.0));
     }
 }

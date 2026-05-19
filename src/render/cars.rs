@@ -100,7 +100,7 @@ fn setup_cars(
         setup.capacity = target_capacity;
 
         if let Some(entity) = setup.entity {
-            commands.entity(entity).despawn();
+            if let Ok(mut ent_cmd) = commands.get_entity(entity) { ent_cmd.despawn(); }
         }
 
         let base_mesh = Cuboid::new(0.5, 0.3, 0.8).mesh().build();

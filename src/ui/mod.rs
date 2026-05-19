@@ -42,6 +42,7 @@ impl Plugin for UiPlugin {
                 paint::paint_tick_system,
                 inspector::handle_selection,
                 inspector::update_inspector_ui,
+                inspector::draw_destination_arrow,
                 inspector::toggle_inspector,
                 perf::update_perf_ui,
                 speed::handle_speed_buttons,

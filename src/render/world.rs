@@ -173,12 +173,12 @@ fn sync_building_view(
     for (e, mut marker, mut mesh, mut _tf) in &mut existing {
         let id = marker.0 as usize;
         if id >= buildings.items.len() {
-            commands.entity(e).despawn();
+            if let Ok(mut ent_cmd) = commands.get_entity(e) { ent_cmd.despawn(); }
             continue;
         }
         let b = &buildings.items[id];
         if b.capacity == 0 {
-            commands.entity(e).despawn();
+            if let Ok(mut ent_cmd) = commands.get_entity(e) { ent_cmd.despawn(); }
             continue;
         }
         if marker.1 != b.level {
